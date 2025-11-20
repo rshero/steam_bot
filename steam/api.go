@@ -74,7 +74,7 @@ type SteamSearchItem struct {
 }
 
 func GetCheapSharkDeals() ([]CheapSharkDeal, error) {
-	url := "https://www.cheapshark.com/api/1.0/deals?storeID=1&upperPrice=30"
+	url := "https://www.cheapshark.com/api/1.0/deals?storeID=1&upperPrice=30&pageSize=10"
 	var deals []CheapSharkDeal
 	err := utils.HttpGetJSON(url, &deals)
 	if err != nil {

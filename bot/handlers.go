@@ -18,8 +18,10 @@ import (
 )
 
 var (
-	sentPosts   = make(map[string]bool)
-	sentPostsMu sync.RWMutex
+	sentPosts      = make(map[string]time.Time)
+	sentPostsMu    sync.RWMutex
+	maxCacheSize   = 200
+	cleanupPercent = 0.5 // Remove oldest 50% when limit reached
 )
 
 func StartBot(cfg *config.Config) (*gotgbot.Bot, *ext.Updater, *ext.Dispatcher, error) {
@@ -63,17 +65,22 @@ func checkAndSendDeals(b *gotgbot.Bot, channelID int64) {
 	sentPostsMu.Lock()
 	if len(sentPosts) == 0 {
 		for _, deal := range deals {
-			sentPosts[deal.DealID] = true
+			sentPosts[deal.DealID] = time.Now()
 		}
 		sentPostsMu.Unlock()
 		log.Println("Initialized sent posts cache with", len(deals), "items")
 		return
 	}
+
+	// Clean up oldest entries if we exceed the limit
+	if len(sentPosts) > maxCacheSize {
+		cleanupOldEntries()
+	}
 	sentPostsMu.Unlock()
 
 	for _, deal := range deals {
 		sentPostsMu.RLock()
-		alreadySent := sentPosts[deal.DealID]
+		_, alreadySent := sentPosts[deal.DealID]
 		sentPostsMu.RUnlock()
 
 		if alreadySent {
@@ -101,12 +108,47 @@ func checkAndSendDeals(b *gotgbot.Bot, channelID int64) {
 		} else {
 			log.Println("Sent deal:", deal.Title)
 			sentPostsMu.Lock()
-			sentPosts[deal.DealID] = true
+			sentPosts[deal.DealID] = time.Now()
 			sentPostsMu.Unlock()
 		}
 
 		time.Sleep(2 * time.Second)
 	}
+}
+
+// cleanupOldEntries removes the oldest entries from sentPosts
+// Must be called with sentPostsMu locked
+func cleanupOldEntries() {
+	if len(sentPosts) == 0 {
+		return
+	}
+
+	// Create a slice of entries sorted by timestamp
+	type entry struct {
+		id   string
+		time time.Time
+	}
+	entries := make([]entry, 0, len(sentPosts))
+	for id, t := range sentPosts {
+		entries = append(entries, entry{id: id, time: t})
+	}
+
+	// Sort by timestamp (oldest first)
+	for i := 0; i < len(entries)-1; i++ {
+		for j := i + 1; j < len(entries); j++ {
+			if entries[i].time.After(entries[j].time) {
+				entries[i], entries[j] = entries[j], entries[i]
+			}
+		}
+	}
+
+	// Remove oldest entries
+	removeCount := int(float64(len(sentPosts)) * cleanupPercent)
+	for _, e := range entries[:removeCount] {
+		delete(sentPosts, e.id)
+	}
+
+	log.Printf("Cleaned up %d old entries from cache, %d remaining", removeCount, len(sentPosts))
 }
 
 func HandleInlineQuery(b *gotgbot.Bot, ctx *ext.Context) error {

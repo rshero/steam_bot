@@ -156,7 +156,7 @@ func HandleInlineQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 	if query == "" {
 		return nil
 	}
-
+	user_id := ctx.InlineQuery.From.Id
 	results, err := steam.SearchSteam(query)
 	if err != nil {
 		log.Println("Error searching steam:", err)
@@ -208,7 +208,7 @@ func HandleInlineQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 							{Text: "SteamDB", Url: fmt.Sprintf("https://steamdb.info/app/%d/", item.ID)},
 						},
 						{
-							{Text: "More details", CallbackData: fmt.Sprintf("more_details:%d", item.ID)},
+							{Text: "More details", CallbackData: fmt.Sprintf("more_details:%d_%d", item.ID, user_id)},
 						},
 					},
 				},
@@ -230,7 +230,17 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	appID := strings.TrimPrefix(data, "more_details:")
+	cbData := strings.TrimPrefix(data, "more_details:")
+	appID := strings.Split(cbData, "_")[0]
+	userID, err := strconv.ParseInt(strings.Split(cbData, "_")[1], 10, 64)
+	if err != nil {
+		return err
+	}
+
+	if userID != ctx.CallbackQuery.From.Id {
+		ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "This is not for you", ShowAlert: true})
+		return nil
+	}
 
 	ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Fetching details..."})
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -259,7 +260,19 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 		reviews = &steam.SteamReviewSummary{}
 	}
 
-	msg := templates.FormatMoreDetails(details.Name, reqs.Minimum, reqs.Recommended, reviews.ReviewScoreDesc, reviews.TotalPositive, reviews.TotalNegative, reviews.TotalReviews)
+	var hltb *steam.HltbResult
+	hltbAPI := os.Getenv("HLTB_API")
+	if hltbAPI != "" {
+		hltb, err = steam.GetHltbData(hltbAPI, appID)
+		if err != nil {
+			log.Println("Error getting HLTB data:", err)
+			hltb = &steam.HltbResult{}
+		}
+	} else {
+		hltb = &steam.HltbResult{}
+	}
+
+	msg := templates.FormatMoreDetails(details.Name, reqs.Minimum, reqs.Recommended, reviews.ReviewScoreDesc, reviews.TotalPositive, reviews.TotalNegative, reviews.TotalReviews, hltb.MainStory, hltb.MainStoryWithExtras, hltb.Completionist)
 
 	if ctx.CallbackQuery.InlineMessageId != "" {
 		_, _, err = b.EditMessageText(msg, &gotgbot.EditMessageTextOpts{

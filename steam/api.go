@@ -73,6 +73,19 @@ type SteamSearchItem struct {
 	} `json:"price"`
 }
 
+type HltbResult struct {
+	ID                  int     `json:"id"`
+	HltbId              int     `json:"hltbId"`
+	Title               string  `json:"title"`
+	ImageUrl            string  `json:"imageUrl"`
+	SteamAppId          int     `json:"steamAppId"`
+	GogAppId            int     `json:"gogAppId"`
+	MainStory           float64 `json:"mainStory"`
+	MainStoryWithExtras float64 `json:"mainStoryWithExtras"`
+	Completionist       float64 `json:"completionist"`
+	LastUpdated         string  `json:"lastUpdatedAt"`
+}
+
 func GetCheapSharkDeals() ([]CheapSharkDeal, error) {
 	url := "https://www.cheapshark.com/api/1.0/deals?storeID=1&upperPrice=30&pageSize=10"
 	var deals []CheapSharkDeal
@@ -142,4 +155,14 @@ func SearchSteam(query string) ([]SteamSearchItem, error) {
 		return result.Items[:5], nil
 	}
 	return result.Items, nil
+}
+
+func GetHltbData(hltbAPI string, appID string) (*HltbResult, error) {
+	url := fmt.Sprintf("%s/steam/%s", hltbAPI, appID)
+	var result HltbResult
+	err := utils.HttpGetJSON(url, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
 }

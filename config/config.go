@@ -11,6 +11,7 @@ import (
 type Config struct {
 	BotToken  string
 	ChannelID int64
+	HltbAPI   string
 }
 
 func LoadConfig() *Config {
@@ -34,8 +35,11 @@ func LoadConfig() *Config {
 		log.Fatalf("Invalid CHANNEL_ID: %v", err)
 	}
 
+	hltbAPI := os.Getenv("HLTB_API")
+
 	return &Config{
 		BotToken:  botToken,
 		ChannelID: channelID,
+		HltbAPI:   hltbAPI,
 	}
 }

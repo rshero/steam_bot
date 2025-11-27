@@ -49,7 +49,7 @@ func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, descript
 	return msg.String()
 }
 
-func FormatMoreDetails(title, minReq, recReq string, reviewDesc string, pos, neg, total int) string {
+func FormatMoreDetails(title, minReq, recReq string, reviewDesc string, pos, neg, total int, mainStory, mainExtra, completionist float64) string {
 	var msg strings.Builder
 	msg.Grow(512)
 	msg.WriteString(fmt.Sprintf("🎮 <b>%s - Details</b>\n\n", title))
@@ -57,6 +57,20 @@ func FormatMoreDetails(title, minReq, recReq string, reviewDesc string, pos, neg
 	if reviewDesc != "" {
 		msg.WriteString(fmt.Sprintf("📊 <b>Reviews:</b> %s\n", reviewDesc))
 		msg.WriteString(fmt.Sprintf("👍 %d | 👎 %d (Total: %d)\n\n", pos, neg, total))
+	}
+
+	if mainStory > 0 || mainExtra > 0 || completionist > 0 {
+		msg.WriteString("⏱️ <b>How Long To Beat:</b>\n")
+		if mainStory > 0 {
+			msg.WriteString(fmt.Sprintf("• Main Story: %gh\n", mainStory))
+		}
+		if mainExtra > 0 {
+			msg.WriteString(fmt.Sprintf("• Main + Extras: %gh\n", mainExtra))
+		}
+		if completionist > 0 {
+			msg.WriteString(fmt.Sprintf("• Completionist: %gh\n", completionist))
+		}
+		msg.WriteString("\n")
 	}
 
 	if minReq != "" {

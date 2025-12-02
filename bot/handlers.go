@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -88,13 +87,13 @@ func checkAndSendDeals(b *gotgbot.Bot, channelID int64) {
 			continue
 		}
 
-		desc, imgURL, inrPrice, err := steam.GetSteamAppDetails(deal.SteamAppID)
+		desc, imgURL, inrPrice, categories, genres, err := steam.GetSteamAppDetails(deal.SteamAppID)
 		if err != nil {
 			log.Printf("Error getting details for app %s: %v", deal.SteamAppID, err)
 			continue
 		}
 
-		msg := templates.FormatDealMessage(deal.Title, deal.NormalPrice, deal.SalePrice, inrPrice, deal.SteamRating, desc, imgURL)
+		msg := templates.FormatDealMessage(deal.Title, deal.NormalPrice, deal.SalePrice, inrPrice, deal.SteamRating, desc, imgURL, categories, genres)
 
 		_, err = b.SendMessage(channelID, msg, &gotgbot.SendMessageOpts{
 			ParseMode: "HTML",
@@ -178,7 +177,7 @@ func HandleInlineQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 			price := float64(item.Price.Final) / 100.0
 			priceStr := fmt.Sprintf("%.2f", price)
 
-			desc, headerImage, inrPrice, _ := steam.GetSteamAppDetails(strconv.Itoa(item.ID))
+			desc, headerImage, inrPrice, categories, genres, _ := steam.GetSteamAppDetails(strconv.Itoa(item.ID))
 			if inrPrice == "" {
 				inrPrice = "N/A"
 			}
@@ -188,7 +187,7 @@ func HandleInlineQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 				imgToUse = item.TinyImage
 			}
 
-			msg := templates.FormatDealMessage(item.Name, priceStr, "", inrPrice, "", desc, imgToUse)
+			msg := templates.FormatDealMessage(item.Name, priceStr, "", inrPrice, "", desc, imgToUse, categories, genres)
 
 			inlineResults[i] = gotgbot.InlineQueryResultArticle{
 				Id:           strconv.Itoa(i),
@@ -209,7 +208,8 @@ func HandleInlineQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 							{Text: "SteamDB", Url: fmt.Sprintf("https://steamdb.info/app/%d/", item.ID)},
 						},
 						{
-							{Text: "More details", CallbackData: fmt.Sprintf("more_details:%d_%d", item.ID, user_id)},
+							{Text: "Details", CallbackData: fmt.Sprintf("more_details:%d_%d", item.ID, user_id)},
+							{Text: "Requirements", CallbackData: fmt.Sprintf("requirements:%d_%d", item.ID, user_id)},
 						},
 					},
 				},
@@ -227,13 +227,26 @@ func HandleInlineQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 
 func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 	data := ctx.CallbackQuery.Data
-	if !strings.HasPrefix(data, "more_details:") {
+
+	isDetailsQuery := strings.HasPrefix(data, "more_details:")
+	isRequirementsQuery := strings.HasPrefix(data, "requirements:")
+
+	if !isDetailsQuery && !isRequirementsQuery {
 		return nil
 	}
 
-	cbData := strings.TrimPrefix(data, "more_details:")
-	appID := strings.Split(cbData, "_")[0]
-	userID, err := strconv.ParseInt(strings.Split(cbData, "_")[1], 10, 64)
+	var cbData, appID string
+	var userID int64
+	var err error
+
+	if isDetailsQuery {
+		cbData = strings.TrimPrefix(data, "more_details:")
+	} else {
+		cbData = strings.TrimPrefix(data, "requirements:")
+	}
+
+	appID = strings.Split(cbData, "_")[0]
+	userID, err = strconv.ParseInt(strings.Split(cbData, "_")[1], 10, 64)
 	if err != nil {
 		return err
 	}
@@ -243,7 +256,7 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Fetching details..."})
+	ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Fetching..."})
 
 	details, err := steam.GetFullSteamAppDetails(appID)
 	if err != nil {
@@ -251,50 +264,100 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	var reqs steam.PcRequirements
-	_ = json.Unmarshal(details.PcRequirements, &reqs)
+	var msg string
+	var replyMarkup gotgbot.InlineKeyboardMarkup
 
-	reviews, err := steam.GetSteamAppReviews(appID)
-	if err != nil {
-		log.Println("Error getting reviews:", err)
-		reviews = &steam.SteamReviewSummary{}
-	}
+	if isRequirementsQuery {
+		// Handle Requirements callback
+		var reqs steam.PcRequirements
+		_ = json.Unmarshal(details.PcRequirements, &reqs)
 
-	var hltb *steam.HltbResult
-	hltbAPI := os.Getenv("HLTB_API")
-	if hltbAPI != "" {
-		hltb, err = steam.GetHltbData(hltbAPI, appID)
-		if err != nil {
-			log.Println("Error getting HLTB data:", err)
-			hltb = &steam.HltbResult{}
+		msg = templates.FormatRequirementsMessage(details.Name, reqs.Minimum, reqs.Recommended)
+		replyMarkup = gotgbot.InlineKeyboardMarkup{
+			InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+				{
+					{Text: "View on Steam", Url: fmt.Sprintf("https://store.steampowered.com/app/%s", appID)},
+				},
+				{
+					{Text: "Details", CallbackData: fmt.Sprintf("more_details:%s_%d", appID, userID)},
+				},
+			},
 		}
 	} else {
-		hltb = &steam.HltbResult{}
-	}
+		// Handle Details callback
+		reviews, err := steam.GetSteamAppReviews(appID)
+		if err != nil {
+			log.Println("Error getting reviews:", err)
+			reviews = &steam.SteamReviewSummary{}
+		}
 
-	msg := templates.FormatMoreDetails(details.Name, reqs.Minimum, reqs.Recommended, reviews.ReviewScoreDesc, reviews.TotalPositive, reviews.TotalNegative, reviews.TotalReviews, hltb.MainStory, hltb.MainStoryWithExtras, hltb.Completionist)
+		// the api got nuked sedlyf
+		// var hltb *steam.HltbResult
+		// hltbAPI := os.Getenv("HLTB_API")
+		// if hltbAPI != "" {
+		// 	hltb, err = steam.GetHltbData(hltbAPI, appID)
+		// 	if err != nil {
+		// 		log.Println("Error getting HLTB data:", err)
+		// 		hltb = &steam.HltbResult{}
+		// 	}
+		// } else {
+		// 	hltb = &steam.HltbResult{}
+		// }
+
+		// Extract category descriptions
+		categories := make([]string, 0, len(details.Categories))
+		for _, cat := range details.Categories {
+			categories = append(categories, cat.Description)
+		}
+
+		// Extract genre descriptions
+		genres := make([]string, 0, len(details.Genres))
+		for _, genre := range details.Genres {
+			genres = append(genres, genre.Description)
+		}
+
+		msg = templates.FormatMoreDetails(
+			details.Name,
+			categories,
+			genres,
+			details.Metacritic.Score,
+			details.Metacritic.URL,
+			reviews.ReviewScoreDesc,
+			reviews.TotalPositive,
+			reviews.TotalNegative,
+			reviews.TotalReviews,
+			0,
+			0,
+			0,
+			details.Developers,
+			details.Publishers,
+			details.ReleaseDate.Date,
+		)
+		replyMarkup = gotgbot.InlineKeyboardMarkup{
+			InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+				{
+					{Text: "View on Steam", Url: fmt.Sprintf("https://store.steampowered.com/app/%s", appID)},
+				},
+				{
+					{Text: "Requirements", CallbackData: fmt.Sprintf("requirements:%s_%d", appID, userID)},
+				},
+			},
+		}
+	}
 
 	if ctx.CallbackQuery.InlineMessageId != "" {
 		_, _, err = b.EditMessageText(msg, &gotgbot.EditMessageTextOpts{
 			InlineMessageId: ctx.CallbackQuery.InlineMessageId,
 			ParseMode:       "HTML",
-			ReplyMarkup: gotgbot.InlineKeyboardMarkup{
-				InlineKeyboard: [][]gotgbot.InlineKeyboardButton{{
-					{Text: "View on Steam", Url: fmt.Sprintf("https://store.steampowered.com/app/%s", appID)},
-				}},
-			},
+			ReplyMarkup:     replyMarkup,
 		})
 		return err
 	}
 
 	if ctx.CallbackQuery.Message != nil {
 		_, _, err = ctx.CallbackQuery.Message.EditText(b, msg, &gotgbot.EditMessageTextOpts{
-			ParseMode: "HTML",
-			ReplyMarkup: gotgbot.InlineKeyboardMarkup{
-				InlineKeyboard: [][]gotgbot.InlineKeyboardButton{{
-					{Text: "View on Steam", Url: fmt.Sprintf("https://store.steampowered.com/app/%s", appID)},
-				}},
-			},
+			ParseMode:   "HTML",
+			ReplyMarkup: replyMarkup,
 		})
 		return err
 	}

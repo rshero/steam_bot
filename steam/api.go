@@ -31,12 +31,38 @@ type SteamAppDetailsResponse struct {
 	Data    SteamAppDetails `json:"data"`
 }
 
+type Category struct {
+	ID          int    `json:"id"`
+	Description string `json:"description"`
+}
+
+type Genre struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+type Metacritic struct {
+	Score int    `json:"score"`
+	URL   string `json:"url"`
+}
+
+type ReleaseDate struct {
+	ComingSoon bool   `json:"coming_soon"`
+	Date       string `json:"date"`
+}
+
 type SteamAppDetails struct {
 	Name             string          `json:"name"`
 	ShortDescription string          `json:"short_description"`
 	HeaderImage      string          `json:"header_image"`
 	PriceOverview    PriceOverview   `json:"price_overview"`
 	PcRequirements   json.RawMessage `json:"pc_requirements"`
+	Metacritic       Metacritic      `json:"metacritic"`
+	Categories       []Category      `json:"categories"`
+	Genres           []Genre         `json:"genres"`
+	Developers       []string        `json:"developers"`
+	Publishers       []string        `json:"publishers"`
+	ReleaseDate      ReleaseDate     `json:"release_date"`
 }
 
 type PcRequirements struct {
@@ -96,10 +122,10 @@ func GetCheapSharkDeals() ([]CheapSharkDeal, error) {
 	return deals, nil
 }
 
-func GetSteamAppDetails(appID string) (string, string, string, error) {
+func GetSteamAppDetails(appID string) (string, string, string, []string, []string, error) {
 	details, err := GetFullSteamAppDetails(appID)
 	if err != nil {
-		return "No description available", "", "", err
+		return "No description available", "", "", nil, nil, err
 	}
 
 	desc := details.ShortDescription
@@ -110,7 +136,19 @@ func GetSteamAppDetails(appID string) (string, string, string, error) {
 	}
 	price = strings.ReplaceAll(price, " ", "")
 
-	return desc, imageURL, price, nil
+	// Extract category descriptions
+	categories := make([]string, 0, len(details.Categories))
+	for _, cat := range details.Categories {
+		categories = append(categories, cat.Description)
+	}
+
+	// Extract genre descriptions
+	genres := make([]string, 0, len(details.Genres))
+	for _, genre := range details.Genres {
+		genres = append(genres, genre.Description)
+	}
+
+	return desc, imageURL, price, categories, genres, nil
 }
 
 func GetFullSteamAppDetails(appID string) (*SteamAppDetails, error) {

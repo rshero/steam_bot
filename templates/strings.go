@@ -25,7 +25,7 @@ var (
 	multiNewlineRegex = regexp.MustCompile(`\n\s*\n`)
 )
 
-func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, description, imageURL string) string {
+func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, description, imageURL string, categories, genres []string) string {
 	if len(description) > 500 {
 		description = description[:500] + "..."
 	}
@@ -49,16 +49,33 @@ func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, descript
 	return msg.String()
 }
 
-func FormatMoreDetails(title, minReq, recReq string, reviewDesc string, pos, neg, total int, mainStory, mainExtra, completionist float64) string {
+func FormatMoreDetails(title string, categories, genres []string, metacriticScore int, metacriticURL string, reviewDesc string, pos, neg, total int, mainStory, mainExtra, completionist float64, developers, publishers []string, releaseDate string) string {
 	var msg strings.Builder
 	msg.Grow(512)
 	msg.WriteString(fmt.Sprintf("🎮 <b>%s - Details</b>\n\n", title))
 
+	// Tags
+	if len(categories) > 0 {
+		msg.WriteString(fmt.Sprintf("🏷️ <b>Tags:</b> %s\n\n", strings.Join(categories, ", ")))
+	}
+
+	// Genres
+	if len(genres) > 0 {
+		msg.WriteString(fmt.Sprintf("🎯 <b>Genres:</b> %s\n\n", strings.Join(genres, ", ")))
+	}
+
+	// Metacritic Score
+	if metacriticScore > 0 {
+		msg.WriteString(fmt.Sprintf("🎖️ <b>Metacritic:</b> %d/100\n\n", metacriticScore))
+	}
+
+	// Reviews
 	if reviewDesc != "" {
 		msg.WriteString(fmt.Sprintf("📊 <b>Reviews:</b> %s\n", reviewDesc))
 		msg.WriteString(fmt.Sprintf("👍 %d | 👎 %d (Total: %d)\n\n", pos, neg, total))
 	}
 
+	// How Long To Beat
 	if mainStory > 0 || mainExtra > 0 || completionist > 0 {
 		msg.WriteString("⏱️ <b>How Long To Beat:</b>\n")
 		if mainStory > 0 {
@@ -73,6 +90,29 @@ func FormatMoreDetails(title, minReq, recReq string, reviewDesc string, pos, neg
 		msg.WriteString("\n")
 	}
 
+	// Developers
+	if len(developers) > 0 {
+		msg.WriteString(fmt.Sprintf("👨‍💻 <b>Developers:</b> %s\n", strings.Join(developers, ", ")))
+	}
+
+	// Publishers
+	if len(publishers) > 0 {
+		msg.WriteString(fmt.Sprintf("🏢 <b>Publishers:</b> %s\n", strings.Join(publishers, ", ")))
+	}
+
+	// Release Date
+	if releaseDate != "" {
+		msg.WriteString(fmt.Sprintf("📅 <b>Release Date:</b> %s\n", releaseDate))
+	}
+
+	return msg.String()
+}
+
+func FormatRequirementsMessage(title, minReq, recReq string) string {
+	var msg strings.Builder
+	msg.Grow(512)
+	msg.WriteString(fmt.Sprintf("🎮 <b>%s - Requirements</b>\n\n", title))
+
 	if minReq != "" {
 		msg.WriteString("💻 <b>Minimum Requirements:</b>\n")
 		msg.WriteString(cleanRequirements(minReq) + "\n\n")
@@ -81,6 +121,10 @@ func FormatMoreDetails(title, minReq, recReq string, reviewDesc string, pos, neg
 	if recReq != "" {
 		msg.WriteString("🚀 <b>Recommended Requirements:</b>\n")
 		msg.WriteString(cleanRequirements(recReq) + "\n")
+	}
+
+	if minReq == "" && recReq == "" {
+		msg.WriteString("No requirements information available.")
 	}
 
 	return msg.String()

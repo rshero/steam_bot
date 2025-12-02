@@ -49,7 +49,7 @@ func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, descript
 	return msg.String()
 }
 
-func FormatMoreDetails(title string, categories, genres []string, metacriticScore int, metacriticURL string, reviewDesc string, pos, neg, total int, mainStory, mainExtra, completionist float64, developers, publishers []string, releaseDate string) string {
+func FormatMoreDetails(title string, categories, genres []string, metacriticScore int, metacriticURL string, reviewDesc string, pos, neg, total int, mainStory, mainExtra, completionist float32, developers, publishers, platforms []string, releaseDate string) string {
 	var msg strings.Builder
 	msg.Grow(512)
 	msg.WriteString(fmt.Sprintf("🎮 <b>%s - Details</b>\n\n", title))
@@ -79,15 +79,20 @@ func FormatMoreDetails(title string, categories, genres []string, metacriticScor
 	if mainStory > 0 || mainExtra > 0 || completionist > 0 {
 		msg.WriteString("⏱️ <b>How Long To Beat:</b>\n")
 		if mainStory > 0 {
-			msg.WriteString(fmt.Sprintf("• Main Story: %gh\n", mainStory))
+			msg.WriteString(fmt.Sprintf("• Main Story: %.2gh\n", mainStory))
 		}
 		if mainExtra > 0 {
-			msg.WriteString(fmt.Sprintf("• Main + Extras: %gh\n", mainExtra))
+			msg.WriteString(fmt.Sprintf("• Main + Extras: %.2gh\n", mainExtra))
 		}
 		if completionist > 0 {
-			msg.WriteString(fmt.Sprintf("• Completionist: %gh\n", completionist))
+			msg.WriteString(fmt.Sprintf("• Completionist: %.2gh\n", completionist))
 		}
 		msg.WriteString("\n")
+	}
+
+	// Platforms
+	if len(platforms) > 0 {
+		msg.WriteString(fmt.Sprintf("🖥️ <b>Platforms:</b> %s\n", strings.Join(platforms, ", ")))
 	}
 
 	// Developers

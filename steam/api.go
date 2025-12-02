@@ -3,10 +3,30 @@ package steam
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"steam_bot/utils"
 	"strings"
+	"sync"
+
+	"github.com/rshero/hltb"
 )
+
+var (
+	hltbClient     *hltb.Client
+	hltbClientOnce sync.Once
+	hltbClientErr  error
+)
+
+func getHltbClient() (*hltb.Client, error) {
+	hltbClientOnce.Do(func() {
+		hltbClient, hltbClientErr = hltb.NewClientWithInit()
+		if hltbClientErr != nil {
+			log.Println("Error initializing HLTB client:", hltbClientErr)
+		}
+	})
+	return hltbClient, hltbClientErr
+}
 
 type CheapSharkDeal struct {
 	Title       string `json:"title"`
@@ -99,19 +119,6 @@ type SteamSearchItem struct {
 	} `json:"price"`
 }
 
-type HltbResult struct {
-	ID                  int     `json:"id"`
-	HltbId              int     `json:"hltbId"`
-	Title               string  `json:"title"`
-	ImageUrl            string  `json:"imageUrl"`
-	SteamAppId          int     `json:"steamAppId"`
-	GogAppId            int     `json:"gogAppId"`
-	MainStory           float64 `json:"mainStory"`
-	MainStoryWithExtras float64 `json:"mainStoryWithExtras"`
-	Completionist       float64 `json:"completionist"`
-	LastUpdated         string  `json:"lastUpdatedAt"`
-}
-
 func GetCheapSharkDeals() ([]CheapSharkDeal, error) {
 	url := "https://www.cheapshark.com/api/1.0/deals?storeID=1&upperPrice=30&pageSize=10"
 	var deals []CheapSharkDeal
@@ -195,12 +202,14 @@ func SearchSteam(query string) ([]SteamSearchItem, error) {
 	return result.Items, nil
 }
 
-func GetHltbData(hltbAPI string, appID string) (*HltbResult, error) {
-	url := fmt.Sprintf("%s/steam/%s", hltbAPI, appID)
-	var result HltbResult
-	err := utils.HttpGetJSON(url, &result)
+func GetHltbData(searchTerm string) (*hltb.Game, error) {
+	client, err := getHltbClient()
 	if err != nil {
-		return nil, err
+		return &hltb.Game{MainStory: 0, MainPlusExtra: 0, Completionist: 0}, err
 	}
-	return &result, nil
+	game, err := client.SearchFirstWithDetails(searchTerm)
+	if err != nil {
+		return &hltb.Game{MainStory: 0, MainPlusExtra: 0, Completionist: 0}, err
+	}
+	return game, nil
 }

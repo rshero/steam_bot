@@ -230,8 +230,9 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 
 	isDetailsQuery := strings.HasPrefix(data, "more_details:")
 	isRequirementsQuery := strings.HasPrefix(data, "requirements:")
+	isHltbQuery := strings.HasPrefix(data, "hltb:")
 
-	if !isDetailsQuery && !isRequirementsQuery {
+	if !isDetailsQuery && !isRequirementsQuery && !isHltbQuery {
 		return nil
 	}
 
@@ -241,8 +242,10 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 
 	if isDetailsQuery {
 		cbData = strings.TrimPrefix(data, "more_details:")
-	} else {
+	} else if isRequirementsQuery {
 		cbData = strings.TrimPrefix(data, "requirements:")
+	} else {
+		cbData = strings.TrimPrefix(data, "hltb:")
 	}
 
 	appID = strings.Split(cbData, "_")[0]
@@ -283,7 +286,7 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 				},
 			},
 		}
-	} else {
+	} else if isDetailsQuery {
 		// Handle Details callback
 		reviews, err := steam.GetSteamAppReviews(appID)
 		if err != nil {
@@ -291,18 +294,60 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 			reviews = &steam.SteamReviewSummary{}
 		}
 
-		// the api got nuked sedlyf
-		// var hltb *steam.HltbResult
-		// hltbAPI := os.Getenv("HLTB_API")
-		// if hltbAPI != "" {
-		// 	hltb, err = steam.GetHltbData(hltbAPI, appID)
-		// 	if err != nil {
-		// 		log.Println("Error getting HLTB data:", err)
-		// 		hltb = &steam.HltbResult{}
-		// 	}
-		// } else {
-		// 	hltb = &steam.HltbResult{}
-		// }
+		// Extract category descriptions
+		categories := make([]string, 0, len(details.Categories))
+		for _, cat := range details.Categories {
+			categories = append(categories, cat.Description)
+		}
+
+		// Extract genre descriptions
+		genres := make([]string, 0, len(details.Genres))
+		for _, genre := range details.Genres {
+			genres = append(genres, genre.Description)
+		}
+
+		// Pass 0 for HLTB values and empty platforms - user can fetch via HLTB button
+		msg = templates.FormatMoreDetails(
+			details.Name,
+			categories,
+			genres,
+			details.Metacritic.Score,
+			details.Metacritic.URL,
+			reviews.ReviewScoreDesc,
+			reviews.TotalPositive,
+			reviews.TotalNegative,
+			reviews.TotalReviews,
+			0, 0, 0, // HLTB: MainStory, MainPlusExtra, Completionist
+			details.Developers,
+			details.Publishers,
+			nil, // Empty platforms
+			details.ReleaseDate.Date,
+		)
+		replyMarkup = gotgbot.InlineKeyboardMarkup{
+			InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+				{
+					{Text: "View on Steam", Url: fmt.Sprintf("https://store.steampowered.com/app/%s", appID)},
+				},
+				{
+					{Text: "Requirements", CallbackData: fmt.Sprintf("requirements:%s_%d", appID, userID)},
+					{Text: "⏱️ HLTB", CallbackData: fmt.Sprintf("hltb:%s_%d", appID, userID)},
+				},
+			},
+		}
+	} else {
+		// Handle HLTB callback
+		reviews, err := steam.GetSteamAppReviews(appID)
+		if err != nil {
+			log.Println("Error getting reviews:", err)
+			reviews = &steam.SteamReviewSummary{}
+		}
+
+		hltbResult, err := steam.GetHltbData(details.Name)
+		if err != nil {
+			log.Println("Error getting hltb data:", err)
+			ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Failed to fetch HLTB data", ShowAlert: true})
+			return nil
+		}
 
 		// Extract category descriptions
 		categories := make([]string, 0, len(details.Categories))
@@ -326,19 +371,18 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 			reviews.TotalPositive,
 			reviews.TotalNegative,
 			reviews.TotalReviews,
-			0,
-			0,
-			0,
+			hltbResult.MainStory,
+			hltbResult.MainPlusExtra,
+			hltbResult.Completionist,
 			details.Developers,
 			details.Publishers,
+			hltbResult.Platforms,
 			details.ReleaseDate.Date,
 		)
 		replyMarkup = gotgbot.InlineKeyboardMarkup{
 			InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 				{
 					{Text: "View on Steam", Url: fmt.Sprintf("https://store.steampowered.com/app/%s", appID)},
-				},
-				{
 					{Text: "Requirements", CallbackData: fmt.Sprintf("requirements:%s_%d", appID, userID)},
 				},
 			},

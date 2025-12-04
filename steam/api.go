@@ -12,6 +12,8 @@ import (
 	"github.com/rshero/hltb"
 )
 
+// ----- HLTB Client Singleton -----
+
 var (
 	hltbClient     *hltb.Client
 	hltbClientOnce sync.Once
@@ -27,6 +29,8 @@ func getHltbClient() (*hltb.Client, error) {
 	})
 	return hltbClient, hltbClientErr
 }
+
+// ----- API Response Types -----
 
 type CheapSharkDeal struct {
 	Title       string `json:"title"`
@@ -71,9 +75,19 @@ type ReleaseDate struct {
 	Date       string `json:"date"`
 }
 
+type PriceOverview struct {
+	FinalFormatted string `json:"final_formatted"`
+}
+
+type PcRequirements struct {
+	Minimum     string `json:"minimum"`
+	Recommended string `json:"recommended"`
+}
+
 type SteamAppDetails struct {
 	Name             string          `json:"name"`
 	ShortDescription string          `json:"short_description"`
+	IsFree           bool            `json:"is_free"`
 	HeaderImage      string          `json:"header_image"`
 	PriceOverview    PriceOverview   `json:"price_overview"`
 	PcRequirements   json.RawMessage `json:"pc_requirements"`
@@ -85,14 +99,75 @@ type SteamAppDetails struct {
 	ReleaseDate      ReleaseDate     `json:"release_date"`
 }
 
-type PcRequirements struct {
-	Minimum     string `json:"minimum"`
-	Recommended string `json:"recommended"`
+// ----- Helper Methods for SteamAppDetails -----
+
+// CategoryNames extracts category description strings from the details
+func (d *SteamAppDetails) CategoryNames() []string {
+	names := make([]string, 0, len(d.Categories))
+	for _, cat := range d.Categories {
+		names = append(names, cat.Description)
+	}
+	return names
 }
 
-type PriceOverview struct {
-	FinalFormatted string `json:"final_formatted"`
+// GenreNames extracts genre description strings from the details
+func (d *SteamAppDetails) GenreNames() []string {
+	names := make([]string, 0, len(d.Genres))
+	for _, genre := range d.Genres {
+		names = append(names, genre.Description)
+	}
+	return names
 }
+
+// FormattedPrice returns a formatted price string handling free games and edge cases
+func (d *SteamAppDetails) FormattedPrice() string {
+	if d.IsFree {
+		return "Free"
+	}
+
+	price := d.PriceOverview.FinalFormatted
+	releaseDate := d.ReleaseDate.Date
+
+	switch {
+	case price == "" && releaseDate == "":
+		return "N/A"
+	case releaseDate == "To be announced":
+		return releaseDate
+	default:
+		return strings.ReplaceAll(price, " ", "")
+	}
+}
+
+// GetPcRequirements parses and returns the PC requirements
+func (d *SteamAppDetails) GetPcRequirements() PcRequirements {
+	var reqs PcRequirements
+	_ = json.Unmarshal(d.PcRequirements, &reqs)
+	return reqs
+}
+
+// ----- AppInfo: Simplified result type for common use cases -----
+
+// AppInfo contains commonly needed app information in a clean struct
+type AppInfo struct {
+	Description string
+	HeaderImage string
+	Price       string
+	Categories  []string
+	Genres      []string
+}
+
+// ToAppInfo converts full details to a simplified AppInfo struct
+func (d *SteamAppDetails) ToAppInfo() AppInfo {
+	return AppInfo{
+		Description: d.ShortDescription,
+		HeaderImage: d.HeaderImage,
+		Price:       d.FormattedPrice(),
+		Categories:  d.CategoryNames(),
+		Genres:      d.GenreNames(),
+	}
+}
+
+// ----- Steam Review Types -----
 
 type SteamReviewSummaryResponse struct {
 	Success      int                `json:"success"`
@@ -105,6 +180,8 @@ type SteamReviewSummary struct {
 	TotalNegative   int    `json:"total_negative"`
 	TotalReviews    int    `json:"total_reviews"`
 }
+
+// ----- Steam Search Types -----
 
 type SteamSearchResult struct {
 	Items []SteamSearchItem `json:"items"`
@@ -119,97 +196,100 @@ type SteamSearchItem struct {
 	} `json:"price"`
 }
 
+// ----- API Functions -----
+
+// GetCheapSharkDeals fetches current deals from CheapShark API
 func GetCheapSharkDeals() ([]CheapSharkDeal, error) {
-	url := "https://www.cheapshark.com/api/1.0/deals?storeID=1&upperPrice=30&pageSize=10"
+	apiURL := "https://www.cheapshark.com/api/1.0/deals?storeID=1&upperPrice=30&pageSize=10"
+
 	var deals []CheapSharkDeal
-	err := utils.HttpGetJSON(url, &deals)
-	if err != nil {
-		return nil, err
+	if err := utils.HttpGetJSON(apiURL, &deals); err != nil {
+		return nil, fmt.Errorf("fetching deals: %w", err)
 	}
+
 	return deals, nil
 }
 
-func GetSteamAppDetails(appID string) (string, string, string, []string, []string, error) {
-	details, err := GetFullSteamAppDetails(appID)
-	if err != nil {
-		return "No description available", "", "", nil, nil, err
-	}
-
-	desc := details.ShortDescription
-	imageURL := details.HeaderImage
-	price := details.PriceOverview.FinalFormatted
-	if price == "" {
-		price = "N/A"
-	}
-	price = strings.ReplaceAll(price, " ", "")
-
-	// Extract category descriptions
-	categories := make([]string, 0, len(details.Categories))
-	for _, cat := range details.Categories {
-		categories = append(categories, cat.Description)
-	}
-
-	// Extract genre descriptions
-	genres := make([]string, 0, len(details.Genres))
-	for _, genre := range details.Genres {
-		genres = append(genres, genre.Description)
-	}
-
-	return desc, imageURL, price, categories, genres, nil
+// GetFullSteamAppDetails fetches complete app details from Steam API with caching
+func GetFullSteamAppDetails(appID string) (*SteamAppDetails, error) {
+	return appDetailsCache.GetOrFetch(appID, func() (*SteamAppDetails, error) {
+		return fetchSteamAppDetails(appID)
+	})
 }
 
-func GetFullSteamAppDetails(appID string) (*SteamAppDetails, error) {
-	url := fmt.Sprintf("https://store.steampowered.com/api/appdetails?appids=%s&cc=in", appID)
+// fetchSteamAppDetails performs the actual API call (internal, uncached)
+func fetchSteamAppDetails(appID string) (*SteamAppDetails, error) {
+	apiURL := fmt.Sprintf("https://store.steampowered.com/api/appdetails?appids=%s&cc=in", appID)
 
 	var response map[string]SteamAppDetailsResponse
-	err := utils.HttpGetJSON(url, &response)
-	if err != nil {
-		return nil, err
+	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
+		return nil, fmt.Errorf("fetching app details: %w", err)
 	}
 
 	data, ok := response[appID]
 	if !ok || !data.Success {
-		return nil, fmt.Errorf("failed to get details for appID %s", appID)
+		return nil, fmt.Errorf("no details found for appID %s", appID)
 	}
+
 	return &data.Data, nil
 }
 
-func GetSteamAppReviews(appID string) (*SteamReviewSummary, error) {
-	url := fmt.Sprintf("https://store.steampowered.com/appreviews/%s?json=1&num_per_page=0", appID)
-	var response SteamReviewSummaryResponse
-	err := utils.HttpGetJSON(url, &response)
+// GetSteamAppInfo fetches app details and returns simplified AppInfo
+// This uses the cache internally via GetFullSteamAppDetails
+func GetSteamAppInfo(appID string) (AppInfo, error) {
+	details, err := GetFullSteamAppDetails(appID)
 	if err != nil {
-		return nil, err
+		return AppInfo{Description: "No description available"}, err
 	}
+
+	return details.ToAppInfo(), nil
+}
+
+// GetSteamAppReviews fetches review summary for an app
+func GetSteamAppReviews(appID string) (*SteamReviewSummary, error) {
+	apiURL := fmt.Sprintf("https://store.steampowered.com/appreviews/%s?json=1&num_per_page=0", appID)
+
+	var response SteamReviewSummaryResponse
+	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
+		return nil, fmt.Errorf("fetching reviews: %w", err)
+	}
+
 	if response.Success != 1 {
-		return nil, fmt.Errorf("failed to get reviews for appID %s", appID)
+		return nil, fmt.Errorf("reviews unavailable for appID %s", appID)
 	}
+
 	return &response.QuerySummary, nil
 }
 
+// SearchSteam searches the Steam store and returns up to 5 results
 func SearchSteam(query string) ([]SteamSearchItem, error) {
 	encodedQuery := url.QueryEscape(query)
-	url := fmt.Sprintf("https://store.steampowered.com/api/storesearch/?term=%s&l=english&cc=US", encodedQuery)
+	apiURL := fmt.Sprintf("https://store.steampowered.com/api/storesearch/?term=%s&l=english&cc=US", encodedQuery)
+
 	var result SteamSearchResult
-	err := utils.HttpGetJSON(url, &result)
-	if err != nil {
-		return nil, err
+	if err := utils.HttpGetJSON(apiURL, &result); err != nil {
+		return nil, fmt.Errorf("searching steam: %w", err)
 	}
 
-	if len(result.Items) > 5 {
-		return result.Items[:5], nil
+	const maxResults = 5
+	if len(result.Items) > maxResults {
+		return result.Items[:maxResults], nil
 	}
+
 	return result.Items, nil
 }
 
+// GetHltbData fetches How Long To Beat data for a game
 func GetHltbData(searchTerm string) (*hltb.Game, error) {
 	client, err := getHltbClient()
 	if err != nil {
-		return &hltb.Game{MainStory: 0, MainPlusExtra: 0, Completionist: 0}, err
+		return &hltb.Game{}, fmt.Errorf("hltb client error: %w", err)
 	}
+
 	game, err := client.SearchFirstWithDetails(searchTerm)
 	if err != nil {
-		return &hltb.Game{MainStory: 0, MainPlusExtra: 0, Completionist: 0}, err
+		return &hltb.Game{}, fmt.Errorf("hltb search error: %w", err)
 	}
+
 	return game, nil
 }

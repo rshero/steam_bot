@@ -53,7 +53,7 @@ func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, descript
 		msg.WriteString(fmt.Sprintf("💸 <b>Price:</b> <code>$%s (was $%s)</code> / <code>%s</code>\n", salePrice, normalPrice, inrPrice))
 	} else {
 		var price string
-		if inrPrice == "N/A" || inrPrice == "Free" || inrPrice == "To be announced" {
+		if inrPrice == "N/A" || inrPrice == "Free" || inrPrice == "To be announced" || inrPrice == "Coming soon" {
 			price = fmt.Sprintf("<code>%s</code>", inrPrice)
 		} else {
 			price = fmt.Sprintf("<code>%s</code> / <code>%s</code>", normalPrice, inrPrice)

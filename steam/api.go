@@ -131,7 +131,7 @@ func (d *SteamAppDetails) FormattedPrice() string {
 	switch {
 	case price == "" && releaseDate == "":
 		return "N/A"
-	case releaseDate == "To be announced":
+	case releaseDate == "To be announced" || releaseDate == "Coming soon":
 		return releaseDate
 	default:
 		return strings.ReplaceAll(price, " ", "")

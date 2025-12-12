@@ -524,3 +524,22 @@ func sendCallbackResponse(b *gotgbot.Bot, ctx *ext.Context, msg string, replyMar
 
 	return nil
 }
+
+func DynamicCmdHandler(b *gotgbot.Bot, ctx *ext.Context) error {
+	text := ctx.EffectiveMessage.Text
+	// Extract command: remove leading /, split by @ or space, take first part
+	cmd := strings.TrimPrefix(text, "/")
+	if idx := strings.IndexAny(cmd, "@ \t"); idx != -1 {
+		cmd = cmd[:idx]
+	}
+
+	reply, ok := templates.Commands[cmd]
+	if !ok {
+		return nil
+	}
+
+	_, err := ctx.EffectiveMessage.Reply(b, reply, &gotgbot.SendMessageOpts{
+		ParseMode: "HTML",
+	})
+	return err
+}

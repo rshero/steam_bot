@@ -25,6 +25,22 @@ var (
 	multiNewlineRegex = regexp.MustCompile(`\n\s*\n`)
 )
 
+// Commands maps command names to their responses
+// I am adding botusername manually here
+var Commands = map[string]string{
+	"start": "Welcome to <b>SteamBot</b>!\n\nUse me inline to search for Steam games and get detailed info.",
+	"help":  "<b>How to use SteamBot:</b>\n\n• Type <code>@steam_offersbot game name</code> in any chat to search\n• Click on a result to share game info\n• Use buttons to view details, requirements, and more",
+}
+
+// CommandKeys returns all command names for regex pattern
+func CommandKeys() string {
+	keys := make([]string, 0, len(Commands))
+	for k := range Commands {
+		keys = append(keys, k)
+	}
+	return strings.Join(keys, "|")
+}
+
 func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, description, imageURL string, categories, genres []string) string {
 	if len(description) > 500 {
 		description = description[:500] + "..."

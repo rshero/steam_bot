@@ -6,10 +6,12 @@ import (
 
 	"steam_bot/bot"
 	"steam_bot/config"
+	"steam_bot/templates"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/message"
 )
 
 func main() {
@@ -22,6 +24,12 @@ func main() {
 
 	dispatcher.AddHandler(handlers.NewInlineQuery(nil, bot.HandleInlineQuery))
 	dispatcher.AddHandler(handlers.NewCallback(nil, bot.HandleCallbackQuery))
+
+	cmdFilter, err := message.Regex(`^/(` + templates.CommandKeys() + `)(@` + b.User.Username + `)?(\s|$)`)
+	if err != nil {
+		log.Fatal("Failed to compile command regex:", err)
+	}
+	dispatcher.AddHandler(handlers.NewMessage(cmdFilter, bot.DynamicCmdHandler))
 
 	err = updater.StartPolling(b, &ext.PollingOpts{
 		DropPendingUpdates: true,

@@ -187,10 +187,98 @@ func cleanupOldEntries() {
 
 // ----- Inline Query Handler -----
 
+func handleInlineDotCommand(b *gotgbot.Bot, ctx *ext.Context, cmd string) error {
+	// If just "." show all available commands
+	if cmd == "" {
+		return showAllInlineCommands(b, ctx)
+	}
+
+	inlineCmd, ok := templates.InlineCommands[cmd]
+	if !ok {
+		return nil
+	}
+
+	results := []gotgbot.InlineQueryResult{
+		buildInlineCommandResult(cmd, inlineCmd),
+	}
+
+	_, err := ctx.InlineQuery.Answer(b, results, &gotgbot.AnswerInlineQueryOpts{
+		CacheTime: 300,
+	})
+	return err
+}
+
+func showAllInlineCommands(b *gotgbot.Bot, ctx *ext.Context) error {
+	results := make([]gotgbot.InlineQueryResult, 0, len(templates.InlineCommands))
+
+	for name, cmd := range templates.InlineCommands {
+		results = append(results, buildInlineCommandResult(name, cmd))
+	}
+
+	_, err := ctx.InlineQuery.Answer(b, results, &gotgbot.AnswerInlineQueryOpts{
+		CacheTime: 300,
+	})
+	return err
+}
+
+func buildInlineCommandResult(name string, cmd templates.InlineCommand) gotgbot.InlineQueryResultArticle {
+	result := gotgbot.InlineQueryResultArticle{
+		Id:          "cmd_" + name,
+		Title:       cmd.Title,
+		Description: cmd.Description,
+		InputMessageContent: gotgbot.InputTextMessageContent{
+			MessageText: cmd.Message,
+			ParseMode:   "HTML",
+		},
+	}
+
+	// Build keyboard
+	var buttons [][]gotgbot.InlineKeyboardButton
+
+	// Add custom keyboard if defined
+	if cmd.Keyboard != nil {
+		for _, row := range cmd.Keyboard() {
+			var btnRow []gotgbot.InlineKeyboardButton
+			for _, btn := range row {
+				b := gotgbot.InlineKeyboardButton{Text: btn.Text}
+				if btn.URL != "" {
+					b.Url = btn.URL
+				}
+				if btn.SwitchInlineQuery != "" {
+					b.SwitchInlineQueryCurrentChat = &btn.SwitchInlineQuery
+				}
+				btnRow = append(btnRow, b)
+			}
+			buttons = append(buttons, btnRow)
+		}
+	}
+
+	// Add "Try" button if SwitchQuery is set
+	if cmd.SwitchQuery != "" {
+		switchQuery := cmd.SwitchQuery
+		buttons = append(buttons, []gotgbot.InlineKeyboardButton{
+			{Text: "Try it", SwitchInlineQueryCurrentChat: &switchQuery},
+		})
+	}
+
+	if len(buttons) > 0 {
+		result.ReplyMarkup = &gotgbot.InlineKeyboardMarkup{
+			InlineKeyboard: buttons,
+		}
+	}
+
+	return result
+}
+
 func HandleInlineQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 	query := ctx.InlineQuery.Query
 	if query == "" {
 		return nil
+	}
+
+	// Handle dot commands (e.g., ".help")
+	if cmd, ok := strings.CutPrefix(query, "."); ok {
+		return handleInlineDotCommand(b, ctx, cmd)
 	}
 
 	userID := ctx.InlineQuery.From.Id

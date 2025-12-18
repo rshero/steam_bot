@@ -25,10 +25,35 @@ var (
 	multiNewlineRegex = regexp.MustCompile(`\n\s*\n`)
 )
 
-// Commands maps command names to their responses
-// I am adding botusername manually here
+// InlineCommand holds configuration for inline dot commands
+type InlineCommand struct {
+	Title       string                  // Display title in inline results
+	Description string                  // Description shown in inline results
+	Message     string                  // Message content when selected
+	Keyboard    func() [][]InlineButton // Optional keyboard builder
+	SwitchQuery string                  // Query to switch to (for "Try" button)
+}
+
+// InlineButton represents a button in inline keyboard
+type InlineButton struct {
+	Text              string
+	URL               string
+	SwitchInlineQuery string // For switch_inline_query_current_chat
+}
+
+// InlineCommands holds all dot command configurations
+var InlineCommands = map[string]InlineCommand{
+	"help": {
+		Title:       "Help",
+		Description: "Learn how to use SteamBot",
+		Message:     "<b>How to use SteamBot:</b>\n\n• Type <code>@steam_offersbot game name</code> in any chat to search\n• Click on a result to share game info\n• Use buttons to view details, requirements, and more",
+		SwitchQuery: "cyberpunk",
+	},
+}
+
+// Commands maps command names to their responses (for /command handling)
 var Commands = map[string]string{
-	"start": "Welcome to <b>SteamBot</b>!\n\nUse me inline to search for Steam games and get detailed info.",
+	"start": "Welcome to <b>SteamBot</b>!\n\nUse the inline to search for Steam games and get detailed info.",
 	"help":  "<b>How to use SteamBot:</b>\n\n• Type <code>@steam_offersbot game name</code> in any chat to search\n• Click on a result to share game info\n• Use buttons to view details, requirements, and more",
 }
 

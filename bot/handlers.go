@@ -193,6 +193,13 @@ func handleInlineDotCommand(b *gotgbot.Bot, ctx *ext.Context, cmd string) error 
 		return showAllInlineCommands(b, ctx)
 	}
 
+	userID := ctx.InlineQuery.From.Id
+
+	// Handle ".mysteam" or ".mysteam username"
+	if cmd == "mysteam" || strings.HasPrefix(cmd, "mysteam ") {
+		return handleMySteamInlineQuery(b, ctx, cmd, userID)
+	}
+
 	inlineCmd, ok := templates.InlineCommands[cmd]
 	if !ok {
 		return nil
@@ -204,6 +211,56 @@ func handleInlineDotCommand(b *gotgbot.Bot, ctx *ext.Context, cmd string) error 
 
 	_, err := ctx.InlineQuery.Answer(b, results, &gotgbot.AnswerInlineQueryOpts{
 		CacheTime: 300,
+	})
+	return err
+}
+
+func handleMySteamInlineQuery(b *gotgbot.Bot, ctx *ext.Context, cmd string, userID int64) error {
+	// Extract username after "mysteam "
+	username, hasUsername := strings.CutPrefix(cmd, "mysteam ")
+	username = strings.TrimSpace(username)
+
+	inlineCmd := templates.InlineCommands["mysteam"]
+
+	var result gotgbot.InlineQueryResultArticle
+
+	if !hasUsername || username == "" {
+		// No username provided - show help with switch inline button
+		switchQuery := ".mysteam "
+		result = gotgbot.InlineQueryResultArticle{
+			Id:          "mysteam_help",
+			Title:       inlineCmd.Title,
+			Description: inlineCmd.Description,
+			InputMessageContent: gotgbot.InputTextMessageContent{
+				MessageText: inlineCmd.Message,
+				ParseMode:   "HTML",
+			},
+			ReplyMarkup: &gotgbot.InlineKeyboardMarkup{
+				InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+					{{Text: "Enter username", SwitchInlineQueryCurrentChat: &switchQuery}},
+				},
+			},
+		}
+	} else {
+		// Username provided - show result with callback button to fetch details
+		result = gotgbot.InlineQueryResultArticle{
+			Id:          "mysteam_" + username,
+			Title:       fmt.Sprintf("Lookup: %s", username),
+			Description: "Click to fetch Steam profile",
+			InputMessageContent: gotgbot.InputTextMessageContent{
+				MessageText: fmt.Sprintf("<b>Steam Profile: %s</b>\n\nClick the button below to fetch profile details.", username),
+				ParseMode:   "HTML",
+			},
+			ReplyMarkup: &gotgbot.InlineKeyboardMarkup{
+				InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+					{{Text: "Fetch Profile", CallbackData: fmt.Sprintf("mysteam:%s_%d", username, userID)}},
+				},
+			},
+		}
+	}
+
+	_, err := ctx.InlineQuery.Answer(b, []gotgbot.InlineQueryResult{result}, &gotgbot.AnswerInlineQueryOpts{
+		CacheTime: 60,
 	})
 	return err
 }
@@ -359,7 +416,13 @@ func formatPriceDisplay(usPrice float64, inrPrice string) string {
 	if usPrice == 0 {
 		return inrPrice
 	}
-	return fmt.Sprintf("$%.2f / %s", usPrice, inrPrice)
+	var priceStr string
+	if inrPrice != "" {
+		priceStr = fmt.Sprintf("$%.2f / %s", usPrice, inrPrice)
+	} else {
+		priceStr = fmt.Sprintf("$%.2f", usPrice)
+	}
+	return priceStr
 }
 
 func firstNonEmpty(values ...string) string {
@@ -396,16 +459,24 @@ const (
 	CallbackDetails
 	CallbackRequirements
 	CallbackHLTB
+	CallbackMySteam
 )
 
 // CallbackData holds parsed callback information
 type CallbackData struct {
 	Type   CallbackType
-	AppID  string
+	AppID  string // Also used as username for mysteam
 	UserID int64
 }
 
-func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
+// NewCallbackQueryHandler creates a callback query handler with config access
+func NewCallbackQueryHandler(cfg *config.Config) func(b *gotgbot.Bot, ctx *ext.Context) error {
+	return func(b *gotgbot.Bot, ctx *ext.Context) error {
+		return HandleCallbackQuery(b, ctx, cfg)
+	}
+}
+
+func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config) error {
 	cbData, err := parseCallbackData(ctx.CallbackQuery.Data)
 	if err != nil || cbData.Type == CallbackUnknown {
 		return nil
@@ -418,6 +489,11 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 			ShowAlert: true,
 		})
 		return nil
+	}
+
+	// Handle mysteam callback separately (doesn't need app details)
+	if cbData.Type == CallbackMySteam {
+		return handleMySteamCallback(b, ctx, cbData, cfg)
 	}
 
 	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Fetching..."})
@@ -438,6 +514,75 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 	return sendCallbackResponse(b, ctx, msg, replyMarkup)
 }
 
+func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData, cfg *config.Config) error {
+	username := cbData.AppID // AppID field holds the username for mysteam
+
+	// Check if username is empty
+	if username == "" {
+		switchQuery := ".mysteam "
+		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      "Please provide a username. Try: .mysteam username",
+			ShowAlert: true,
+		})
+		// Update button to prompt for username
+		_, _, _ = b.EditMessageReplyMarkup(&gotgbot.EditMessageReplyMarkupOpts{
+			InlineMessageId: ctx.CallbackQuery.InlineMessageId,
+			ReplyMarkup: gotgbot.InlineKeyboardMarkup{
+				InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+					{{Text: "Enter username", SwitchInlineQueryCurrentChat: &switchQuery}},
+				},
+			},
+		})
+		return nil
+	}
+
+	// Check if API key is configured
+	if cfg.SteamAPIKey == "" {
+		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      "Steam API key not configured",
+			ShowAlert: true,
+		})
+		return nil
+	}
+
+	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Fetching profile..."})
+
+	// Fetch user info
+	userInfo, err := steam.GetSteamUserInfo(cfg.SteamAPIKey, username)
+	if err != nil {
+		log.Println("Error getting Steam user info:", err)
+		_, _, _ = b.EditMessageText(fmt.Sprintf("<b>Error:</b> User not found: %s", username), &gotgbot.EditMessageTextOpts{
+			InlineMessageId: ctx.CallbackQuery.InlineMessageId,
+			ParseMode:       "HTML",
+		})
+		return nil
+	}
+
+	// Format and send the profile
+	msg := templates.FormatSteamUserProfile(
+		userInfo.Summary.PersonaName,
+		userInfo.Summary.ProfileURL,
+		userInfo.Summary.Avatar,
+		userInfo.Summary.PersonaState,
+		userInfo.Level,
+		userInfo.GameCount,
+		userInfo.Summary.CountryCode,
+	)
+
+	replyMarkup := gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{{Text: "View Profile", Url: userInfo.Summary.ProfileURL}},
+		},
+	}
+
+	_, _, err = b.EditMessageText(msg, &gotgbot.EditMessageTextOpts{
+		InlineMessageId: ctx.CallbackQuery.InlineMessageId,
+		ParseMode:       "HTML",
+		ReplyMarkup:     replyMarkup,
+	})
+	return err
+}
+
 func parseCallbackData(data string) (CallbackData, error) {
 	result := CallbackData{}
 
@@ -446,6 +591,7 @@ func parseCallbackData(data string) (CallbackData, error) {
 		"more_details:": CallbackDetails, // Support legacy format
 		"requirements:": CallbackRequirements,
 		"hltb:":         CallbackHLTB,
+		"mysteam:":      CallbackMySteam,
 	}
 
 	var payload string

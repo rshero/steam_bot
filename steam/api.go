@@ -86,6 +86,7 @@ type PcRequirements struct {
 
 type SteamAppDetails struct {
 	Name             string          `json:"name"`
+	AppType          string          `json:"type"`
 	ShortDescription string          `json:"short_description"`
 	IsFree           bool            `json:"is_free"`
 	HeaderImage      string          `json:"header_image"`
@@ -196,6 +197,49 @@ type SteamSearchItem struct {
 	} `json:"price"`
 }
 
+// ----- Steam User Types -----
+
+type SteamVanityURLResponse struct {
+	Response struct {
+		SteamID string `json:"steamid"`
+		Success int    `json:"success"`
+	} `json:"response"`
+}
+
+type SteamPlayerSummariesResponse struct {
+	Response struct {
+		Players []SteamPlayerSummary `json:"players"`
+	} `json:"response"`
+}
+
+type SteamPlayerSummary struct {
+	SteamID      string `json:"steamid"`
+	PersonaName  string `json:"personaname"`
+	ProfileURL   string `json:"profileurl"`
+	Avatar       string `json:"avatarfull"`
+	PersonaState int    `json:"personastate"`
+	TimeCreated  int64  `json:"timecreated"`
+	CountryCode  string `json:"loccountrycode"`
+}
+
+type SteamPlayerLevelResponse struct {
+	Response struct {
+		PlayerLevel int `json:"player_level"`
+	} `json:"response"`
+}
+
+type SteamOwnedGamesResponse struct {
+	Response struct {
+		GameCount int `json:"game_count"`
+	} `json:"response"`
+}
+
+type SteamUserInfo struct {
+	Summary   SteamPlayerSummary
+	Level     int
+	GameCount int
+}
+
 // ----- API Functions -----
 
 // GetCheapSharkDeals fetches current deals from CheapShark API
@@ -292,4 +336,88 @@ func GetHltbData(searchTerm string) (*hltb.Game, error) {
 	}
 
 	return game, nil
+}
+
+// ----- Steam User API Functions -----
+
+// ResolveSteamVanityURL resolves a Steam vanity URL to a Steam ID
+func ResolveSteamVanityURL(apiKey, vanityURL string) (string, error) {
+	apiURL := fmt.Sprintf("https://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key=%s&vanityurl=%s",
+		apiKey, url.QueryEscape(vanityURL))
+
+	var response SteamVanityURLResponse
+	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
+		return "", fmt.Errorf("resolving vanity URL: %w", err)
+	}
+
+	if response.Response.Success != 1 {
+		return "", fmt.Errorf("user not found: %s", vanityURL)
+	}
+
+	return response.Response.SteamID, nil
+}
+
+// GetSteamPlayerSummary fetches player summary for a Steam ID
+func GetSteamPlayerSummary(apiKey, steamID string) (*SteamPlayerSummary, error) {
+	apiURL := fmt.Sprintf("https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=%s&steamids=%s",
+		apiKey, steamID)
+
+	var response SteamPlayerSummariesResponse
+	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
+		return nil, fmt.Errorf("fetching player summary: %w", err)
+	}
+
+	if len(response.Response.Players) == 0 {
+		return nil, fmt.Errorf("no player found for steamID: %s", steamID)
+	}
+
+	return &response.Response.Players[0], nil
+}
+
+// GetSteamLevel fetches the Steam level for a player
+func GetSteamLevel(apiKey, steamID string) (int, error) {
+	apiURL := fmt.Sprintf("https://api.steampowered.com/IPlayerService/GetSteamLevel/v1/?key=%s&steamid=%s",
+		apiKey, steamID)
+
+	var response SteamPlayerLevelResponse
+	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
+		return 0, fmt.Errorf("fetching steam level: %w", err)
+	}
+
+	return response.Response.PlayerLevel, nil
+}
+
+// GetSteamOwnedGamesCount fetches the number of games owned by a player
+func GetSteamOwnedGamesCount(apiKey, steamID string) (int, error) {
+	apiURL := fmt.Sprintf("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=%s&steamid=%s&include_played_free_games=true",
+		apiKey, steamID)
+
+	var response SteamOwnedGamesResponse
+	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
+		return 0, fmt.Errorf("fetching owned games: %w", err)
+	}
+
+	return response.Response.GameCount, nil
+}
+
+// GetSteamUserInfo fetches complete user info by username (vanity URL)
+func GetSteamUserInfo(apiKey, username string) (*SteamUserInfo, error) {
+	steamID, err := ResolveSteamVanityURL(apiKey, username)
+	if err != nil {
+		return nil, err
+	}
+
+	summary, err := GetSteamPlayerSummary(apiKey, steamID)
+	if err != nil {
+		return nil, err
+	}
+
+	level, _ := GetSteamLevel(apiKey, steamID)
+	gameCount, _ := GetSteamOwnedGamesCount(apiKey, steamID)
+
+	return &SteamUserInfo{
+		Summary:   *summary,
+		Level:     level,
+		GameCount: gameCount,
+	}, nil
 }

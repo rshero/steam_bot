@@ -49,6 +49,12 @@ var InlineCommands = map[string]InlineCommand{
 		Message:     "<b>How to use SteamBot:</b>\n\n• Type <code>@steam_offersbot game name</code> in any chat to search\n• Click on a result to share game info\n• Use buttons to view details, requirements, and more",
 		SwitchQuery: "cyberpunk",
 	},
+	"mysteam": {
+		Title:       "My Steam Profile",
+		Description: "Look up Steam user profile",
+		Message:     "<b>Steam Profile Lookup</b>\n\nType <code>.mysteam username</code> to search for a Steam user profile.",
+		SwitchQuery: ".mysteam ",
+	},
 }
 
 // Commands maps command names to their responses (for /command handling)
@@ -81,7 +87,10 @@ func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, descript
 		if inrPrice == "N/A" || inrPrice == "Free" || inrPrice == "To be announced" || inrPrice == "Coming soon" {
 			price = fmt.Sprintf("<code>%s</code>", inrPrice)
 		} else {
-			price = fmt.Sprintf("<code>%s</code> / <code>%s</code>", normalPrice, inrPrice)
+			price = fmt.Sprintf("<code>%s</code>", normalPrice)
+			if inrPrice != "" {
+				price += fmt.Sprintf(" / <code>%s</code>", inrPrice)
+			}
 		}
 		msg.WriteString(fmt.Sprintf("💸 <b>Price:</b> %s\n", price))
 	}
@@ -201,4 +210,59 @@ func cleanRequirements(req string) string {
 	req = multiNewlineRegex.ReplaceAllString(req, "\n")
 
 	return strings.TrimSpace(req)
+}
+
+// FormatSteamUserProfile formats a Steam user profile for display
+func FormatSteamUserProfile(personaName, profileURL, avatar string, personaState int, level, gameCount int, countryCode string) string {
+	var msg strings.Builder
+	msg.Grow(512)
+
+	// Avatar as hidden link for preview
+	if avatar != "" {
+		msg.WriteString(fmt.Sprintf("<a href='%s'>&#xad;</a>", avatar))
+	}
+
+	msg.WriteString(fmt.Sprintf("<b>%s</b>\n\n", personaName))
+
+	// Status
+	status := personaStateToString(personaState)
+	msg.WriteString(fmt.Sprintf("<b>Status:</b> %s\n", status))
+
+	// Level
+	if level > 0 {
+		msg.WriteString(fmt.Sprintf("<b>Level:</b> %d\n", level))
+	}
+
+	// Games
+	if gameCount > 0 {
+		msg.WriteString(fmt.Sprintf("<b>Games:</b> %d\n", gameCount))
+	}
+
+	// Country
+	if countryCode != "" {
+		msg.WriteString(fmt.Sprintf("<b>Country:</b> %s\n", countryCode))
+	}
+
+	return msg.String()
+}
+
+func personaStateToString(state int) string {
+	switch state {
+	case 0:
+		return "Offline"
+	case 1:
+		return "Online"
+	case 2:
+		return "Busy"
+	case 3:
+		return "Away"
+	case 4:
+		return "Snooze"
+	case 5:
+		return "Looking to trade"
+	case 6:
+		return "Looking to play"
+	default:
+		return "Unknown"
+	}
 }

@@ -23,7 +23,7 @@ func main() {
 	}
 
 	dispatcher.AddHandler(handlers.NewInlineQuery(nil, bot.HandleInlineQuery))
-	dispatcher.AddHandler(handlers.NewCallback(nil, bot.HandleCallbackQuery))
+	dispatcher.AddHandler(handlers.NewCallback(nil, bot.NewCallbackQueryHandler(cfg)))
 
 	cmdFilter, err := message.Regex(`^/(` + templates.CommandKeys() + `)(@` + b.User.Username + `)?(\s|$)`)
 	if err != nil {

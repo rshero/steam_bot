@@ -9,9 +9,10 @@ import (
 )
 
 type Config struct {
-	BotToken  string
-	ChannelID int64
-	HltbAPI   string
+	BotToken    string
+	ChannelID   int64
+	HltbAPI     string
+	SteamAPIKey string
 }
 
 func LoadConfig() *Config {
@@ -36,10 +37,12 @@ func LoadConfig() *Config {
 	}
 
 	hltbAPI := os.Getenv("HLTB_API")
+	steamAPIKey := os.Getenv("STEAM_API_KEY")
 
 	return &Config{
-		BotToken:  botToken,
-		ChannelID: channelID,
-		HltbAPI:   hltbAPI,
+		BotToken:    botToken,
+		ChannelID:   channelID,
+		HltbAPI:     hltbAPI,
+		SteamAPIKey: steamAPIKey,
 	}
 }

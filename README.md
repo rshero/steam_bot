@@ -22,6 +22,7 @@ A high-performance Telegram bot written in Go that searches for Steam games and 
    ```env
    BOT_TOKEN=your_telegram_bot_token
    CHANNEL_ID=your_channel_id
+   STEAM_API_KEY=your_steam_api_key
    ```
 
 3. **Build & Run**

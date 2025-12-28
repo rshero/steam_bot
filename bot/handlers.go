@@ -329,8 +329,10 @@ func buildInlineCommandResult(name string, cmd templates.InlineCommand) gotgbot.
 
 func HandleInlineQuery(b *gotgbot.Bot, ctx *ext.Context) error {
 	query := ctx.InlineQuery.Query
+
+	// Show all commands menu when query is empty
 	if query == "" {
-		return nil
+		return showAllInlineCommands(b, ctx)
 	}
 
 	// Handle dot commands (e.g., ".help")

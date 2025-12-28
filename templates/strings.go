@@ -78,10 +78,10 @@ func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, descript
 	}
 
 	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("🎮 <b>%s</b>\n", title))
+	fmt.Fprintf(&msg, "🎮 <b>%s</b>\n", title)
 
 	if salePrice != "" {
-		msg.WriteString(fmt.Sprintf("💸 <b>Price:</b> <code>$%s (was $%s)</code> / <code>%s</code>\n", salePrice, normalPrice, inrPrice))
+		fmt.Fprintf(&msg, "💸 <b>Price:</b> <code>$%s (was $%s)</code> / <code>%s</code>\n", salePrice, normalPrice, inrPrice)
 	} else {
 		var price string
 		if inrPrice == "N/A" || inrPrice == "Free" || inrPrice == "To be announced" || inrPrice == "Coming soon" {
@@ -92,15 +92,15 @@ func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, descript
 				price += fmt.Sprintf(" / <code>%s</code>", inrPrice)
 			}
 		}
-		msg.WriteString(fmt.Sprintf("💸 <b>Price:</b> %s\n", price))
+		fmt.Fprintf(&msg, "💸 <b>Price:</b> %s\n", price)
 	}
 
 	if rating != "" {
-		msg.WriteString(fmt.Sprintf("⭐ <b>Steam Rating:</b> <code>%s</code>\n", rating))
+		fmt.Fprintf(&msg, "⭐ <b>Steam Rating:</b> <code>%s</code>\n", rating)
 	}
 
-	msg.WriteString(fmt.Sprintf("<a href='%s'>&#xad;</a>\n", imageURL))
-	msg.WriteString(fmt.Sprintf("<i>%s</i>", description))
+	fmt.Fprintf(&msg, "<a href='%s'>&#xad;</a>\n", imageURL)
+	fmt.Fprintf(&msg, "<i>%s</i>", description)
 
 	return msg.String()
 }
@@ -108,62 +108,62 @@ func FormatDealMessage(title, normalPrice, salePrice, inrPrice, rating, descript
 func FormatMoreDetails(title string, categories, genres []string, metacriticScore int, metacriticURL string, reviewDesc string, pos, neg, total int, mainStory, mainExtra, completionist float32, developers, publishers, platforms []string, releaseDate string) string {
 	var msg strings.Builder
 	msg.Grow(512)
-	msg.WriteString(fmt.Sprintf("🎮 <b>%s - Details</b>\n\n", title))
+	fmt.Fprintf(&msg, "🎮 <b>%s - Details</b>\n\n", title)
 
 	// Tags
 	if len(categories) > 0 {
-		msg.WriteString(fmt.Sprintf("🏷️ <b>Tags:</b> %s\n\n", strings.Join(categories, ", ")))
+		fmt.Fprintf(&msg, "🏷️ <b>Tags:</b> %s\n\n", strings.Join(categories, ", "))
 	}
 
 	// Genres
 	if len(genres) > 0 {
-		msg.WriteString(fmt.Sprintf("🎯 <b>Genres:</b> %s\n\n", strings.Join(genres, ", ")))
+		fmt.Fprintf(&msg, "🎯 <b>Genres:</b> %s\n\n", strings.Join(genres, ", "))
 	}
 
 	// Metacritic Score
 	if metacriticScore > 0 {
-		msg.WriteString(fmt.Sprintf("🎖️ <b>Metacritic:</b> %d/100\n\n", metacriticScore))
+		fmt.Fprintf(&msg, "🎖️ <b>Metacritic:</b> %d/100\n\n", metacriticScore)
 	}
 
 	// Reviews
 	if reviewDesc != "" {
-		msg.WriteString(fmt.Sprintf("📊 <b>Reviews:</b> %s\n", reviewDesc))
-		msg.WriteString(fmt.Sprintf("👍 %d | 👎 %d (Total: %d)\n\n", pos, neg, total))
+		fmt.Fprintf(&msg, "📊 <b>Reviews:</b> %s\n", reviewDesc)
+		fmt.Fprintf(&msg, "👍 %d | 👎 %d (Total: %d)\n\n", pos, neg, total)
 	}
 
 	// How Long To Beat
 	if mainStory > 0 || mainExtra > 0 || completionist > 0 {
 		msg.WriteString("⏱️ <b>How Long To Beat:</b>\n")
 		if mainStory > 0 {
-			msg.WriteString(fmt.Sprintf("• Main Story: %.2gh\n", mainStory))
+			fmt.Fprintf(&msg, "• Main Story: %.2gh\n", mainStory)
 		}
 		if mainExtra > 0 {
-			msg.WriteString(fmt.Sprintf("• Main + Extras: %.2gh\n", mainExtra))
+			fmt.Fprintf(&msg, "• Main + Extras: %.2gh\n", mainExtra)
 		}
 		if completionist > 0 {
-			msg.WriteString(fmt.Sprintf("• Completionist: %.2gh\n", completionist))
+			fmt.Fprintf(&msg, "• Completionist: %.2gh\n", completionist)
 		}
 		msg.WriteString("\n")
 	}
 
 	// Platforms
 	if len(platforms) > 0 {
-		msg.WriteString(fmt.Sprintf("🖥️ <b>Platforms:</b> %s\n", strings.Join(platforms, ", ")))
+		fmt.Fprintf(&msg, "🖥️ <b>Platforms:</b> %s\n", strings.Join(platforms, ", "))
 	}
 
 	// Developers
 	if len(developers) > 0 {
-		msg.WriteString(fmt.Sprintf("👨‍💻 <b>Developers:</b> %s\n", strings.Join(developers, ", ")))
+		fmt.Fprintf(&msg, "👨‍💻 <b>Developers:</b> %s\n", strings.Join(developers, ", "))
 	}
 
 	// Publishers
 	if len(publishers) > 0 {
-		msg.WriteString(fmt.Sprintf("🏢 <b>Publishers:</b> %s\n", strings.Join(publishers, ", ")))
+		fmt.Fprintf(&msg, "🏢 <b>Publishers:</b> %s\n", strings.Join(publishers, ", "))
 	}
 
 	// Release Date
 	if releaseDate != "" {
-		msg.WriteString(fmt.Sprintf("📅 <b>Release Date:</b> %s\n", releaseDate))
+		fmt.Fprintf(&msg, "📅 <b>Release Date:</b> %s\n", releaseDate)
 	}
 
 	return msg.String()
@@ -172,7 +172,7 @@ func FormatMoreDetails(title string, categories, genres []string, metacriticScor
 func FormatRequirementsMessage(title, minReq, recReq string) string {
 	var msg strings.Builder
 	msg.Grow(512)
-	msg.WriteString(fmt.Sprintf("🎮 <b>%s - Requirements</b>\n\n", title))
+	fmt.Fprintf(&msg, "🎮 <b>%s - Requirements</b>\n\n", title)
 
 	if minReq != "" {
 		msg.WriteString("💻 <b>Minimum Requirements:</b>\n")
@@ -219,28 +219,28 @@ func FormatSteamUserProfile(personaName, profileURL, avatar string, personaState
 
 	// Avatar as hidden link for preview
 	if avatar != "" {
-		msg.WriteString(fmt.Sprintf("<a href='%s'>&#xad;</a>", avatar))
+		fmt.Fprintf(&msg, "<a href='%s'>&#xad;</a>", avatar)
 	}
 
-	msg.WriteString(fmt.Sprintf("<b>%s</b>\n\n", personaName))
+	fmt.Fprintf(&msg, "<b>%s</b>\n\n", personaName)
 
 	// Status
 	status := personaStateToString(personaState)
-	msg.WriteString(fmt.Sprintf("<b>Status:</b> %s\n", status))
+	fmt.Fprintf(&msg, "<b>Status:</b> %s\n", status)
 
 	// Level
 	if level > 0 {
-		msg.WriteString(fmt.Sprintf("<b>Level:</b> %d\n", level))
+		fmt.Fprintf(&msg, "<b>Level:</b> %d\n", level)
 	}
 
 	// Games
 	if gameCount > 0 {
-		msg.WriteString(fmt.Sprintf("<b>Games:</b> %d\n", gameCount))
+		fmt.Fprintf(&msg, "<b>Games:</b> %d\n", gameCount)
 	}
 
 	// Country
 	if countryCode != "" {
-		msg.WriteString(fmt.Sprintf("<b>Country:</b> %s\n", countryCode))
+		fmt.Fprintf(&msg, "<b>Country:</b> %s\n", countryCode)
 	}
 
 	return msg.String()

@@ -188,11 +188,6 @@ func cleanupOldEntries() {
 // ----- Inline Query Handler -----
 
 func handleInlineDotCommand(b *gotgbot.Bot, ctx *ext.Context, cmd string) error {
-	// If just "." show all available commands
-	if cmd == "" {
-		return showAllInlineCommands(b, ctx)
-	}
-
 	userID := ctx.InlineQuery.From.Id
 
 	// Handle ".mysteam" or ".mysteam username"
@@ -228,9 +223,10 @@ func handleMySteamInlineQuery(b *gotgbot.Bot, ctx *ext.Context, cmd string, user
 		// No username provided - show help with switch inline button
 		switchQuery := ".mysteam "
 		result = gotgbot.InlineQueryResultArticle{
-			Id:          "mysteam_help",
-			Title:       inlineCmd.Title,
-			Description: inlineCmd.Description,
+			Id:           "mysteam_help",
+			Title:        inlineCmd.Title,
+			Description:  inlineCmd.Description,
+			ThumbnailUrl: inlineCmd.ThumbnailUrl,
 			InputMessageContent: gotgbot.InputTextMessageContent{
 				MessageText: inlineCmd.Message,
 				ParseMode:   "HTML",
@@ -244,9 +240,10 @@ func handleMySteamInlineQuery(b *gotgbot.Bot, ctx *ext.Context, cmd string, user
 	} else {
 		// Username provided - show result with callback button to fetch details
 		result = gotgbot.InlineQueryResultArticle{
-			Id:          "mysteam_" + username,
-			Title:       fmt.Sprintf("Lookup: %s", username),
-			Description: "Click to fetch Steam profile",
+			Id:           "mysteam_" + username,
+			Title:        fmt.Sprintf("Lookup: %s", username),
+			Description:  "Click to fetch Steam profile",
+			ThumbnailUrl: inlineCmd.ThumbnailUrl,
 			InputMessageContent: gotgbot.InputTextMessageContent{
 				MessageText: fmt.Sprintf("<b>Steam Profile: %s</b>\n\nClick the button below to fetch profile details.", username),
 				ParseMode:   "HTML",
@@ -287,6 +284,7 @@ func buildInlineCommandResult(name string, cmd templates.InlineCommand) gotgbot.
 			MessageText: cmd.Message,
 			ParseMode:   "HTML",
 		},
+		ThumbnailUrl: cmd.ThumbnailUrl,
 	}
 
 	// Build keyboard

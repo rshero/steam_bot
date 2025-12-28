@@ -27,11 +27,12 @@ var (
 
 // InlineCommand holds configuration for inline dot commands
 type InlineCommand struct {
-	Title       string                  // Display title in inline results
-	Description string                  // Description shown in inline results
-	Message     string                  // Message content when selected
-	Keyboard    func() [][]InlineButton // Optional keyboard builder
-	SwitchQuery string                  // Query to switch to (for "Try" button)
+	Title        string                  // Display title in inline results
+	Description  string                  // Description shown in inline results
+	Message      string                  // Message content when selected
+	Keyboard     func() [][]InlineButton // Optional keyboard builder
+	SwitchQuery  string                  // Query to switch to (for "Try" button)
+	ThumbnailUrl string                  // URL of the thumbnail image for the result
 }
 
 // InlineButton represents a button in inline keyboard
@@ -44,16 +45,18 @@ type InlineButton struct {
 // InlineCommands holds all dot command configurations
 var InlineCommands = map[string]InlineCommand{
 	"help": {
-		Title:       "Help",
-		Description: "Learn how to use SteamBot",
-		Message:     "<b>How to use SteamBot:</b>\n\n• Type <code>@steam_offersbot game name</code> in any chat to search\n• Click on a result to share game info\n• Use buttons to view details, requirements, and more",
-		SwitchQuery: "cyberpunk",
+		Title:        "Help",
+		Description:  "Learn how to use SteamBot",
+		Message:      "<b>How to use SteamBot:</b>\n\n• Type <code>@steam_offersbot game name</code> in any chat to search\n• Click on a result to share game info\n• Use buttons to view details, requirements, and more",
+		SwitchQuery:  "cyberpunk",
+		ThumbnailUrl: "https://i.ibb.co/j9vY5DJb/icons8-gamepad-100.png",
 	},
 	"mysteam": {
-		Title:       "My Steam Profile",
-		Description: "Look up Steam user profile",
-		Message:     "<b>Steam Profile Lookup</b>\n\nType <code>.mysteam username</code> to search for a Steam user profile.",
-		SwitchQuery: ".mysteam ",
+		Title:        "My Steam Profile",
+		Description:  "Look up Steam user profile",
+		Message:      "<b>Steam Profile Lookup</b>\n\nType <code>.mysteam username</code> to search for a Steam user profile.",
+		SwitchQuery:  ".mysteam ",
+		ThumbnailUrl: "https://i.ibb.co/x8hq8BHs/icons8-steam-64.png",
 	},
 }
 

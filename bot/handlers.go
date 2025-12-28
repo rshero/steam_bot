@@ -460,6 +460,7 @@ const (
 	CallbackRequirements
 	CallbackHLTB
 	CallbackMySteam
+	CallbackBack
 )
 
 // CallbackData holds parsed callback information
@@ -496,6 +497,11 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config) e
 		return handleMySteamCallback(b, ctx, cbData, cfg)
 	}
 
+	// Handle back callback (uses cache to restore original view)
+	if cbData.Type == CallbackBack {
+		return handleBackCallback(b, ctx, cbData)
+	}
+
 	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Fetching..."})
 
 	// Fetch app details once (cached)
@@ -512,6 +518,56 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config) e
 	}
 
 	return sendCallbackResponse(b, ctx, msg, replyMarkup)
+}
+
+func handleBackCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData) error {
+	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Going back..."})
+
+	// Try to get from cache first
+	cache := steam.GetAppDetailsCache()
+	details, cached := cache.Get(cbData.AppID)
+
+	// If not cached, fetch it
+	if !cached {
+		var err error
+		details, err = steam.GetFullSteamAppDetails(cbData.AppID)
+		if err != nil {
+			log.Println("Error getting details for back navigation:", err)
+			return nil
+		}
+	}
+
+	// Get app info for pricing
+	appInfo, _ := steam.GetSteamAppInfo(cbData.AppID)
+
+	// Parse appID to int for URL generation
+	appIDInt, _ := strconv.Atoi(cbData.AppID)
+
+	// Format price display
+	var priceDisplay string
+	if appInfo.Price != "" {
+		priceDisplay = appInfo.Price
+	} else {
+		priceDisplay = "Free"
+	}
+
+	// Reconstruct the original search result message
+	msg := templates.FormatDealMessage(
+		details.Name,
+		priceDisplay,
+		"",
+		appInfo.Price,
+		"",
+		appInfo.Description,
+		appInfo.HeaderImage,
+		appInfo.Categories,
+		appInfo.Genres,
+	)
+
+	// Build the original inline keyboard
+	replyMarkup := buildInlineKeyboard(appIDInt, cbData.UserID)
+
+	return sendCallbackResponse(b, ctx, msg, *replyMarkup)
 }
 
 func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData, cfg *config.Config) error {
@@ -592,6 +648,7 @@ func parseCallbackData(data string) (CallbackData, error) {
 		"requirements:": CallbackRequirements,
 		"hltb:":         CallbackHLTB,
 		"mysteam:":      CallbackMySteam,
+		"back:":         CallbackBack,
 	}
 
 	var payload string
@@ -665,6 +722,9 @@ func handleDetailsCallback(cbData CallbackData, details *steam.SteamAppDetails) 
 				{Text: "Requirements", CallbackData: fmt.Sprintf("requirements:%s_%d", cbData.AppID, cbData.UserID)},
 				{Text: "⏱️ HLTB", CallbackData: fmt.Sprintf("hltb:%s_%d", cbData.AppID, cbData.UserID)},
 			},
+			{
+				{Text: "❮", CallbackData: fmt.Sprintf("back:%s_%d", cbData.AppID, cbData.UserID)},
+			},
 		},
 	}
 
@@ -682,6 +742,9 @@ func handleRequirementsCallback(cbData CallbackData, details *steam.SteamAppDeta
 			},
 			{
 				{Text: "Details", CallbackData: fmt.Sprintf("details:%s_%d", cbData.AppID, cbData.UserID)},
+			},
+			{
+				{Text: "❮", CallbackData: fmt.Sprintf("back:%s_%d", cbData.AppID, cbData.UserID)},
 			},
 		},
 	}
@@ -722,6 +785,9 @@ func handleHLTBCallback(cbData CallbackData, details *steam.SteamAppDetails) (st
 			{
 				{Text: "View on Steam", Url: fmt.Sprintf("https://store.steampowered.com/app/%s", cbData.AppID)},
 				{Text: "Requirements", CallbackData: fmt.Sprintf("requirements:%s_%d", cbData.AppID, cbData.UserID)},
+			},
+			{
+				{Text: "❮", CallbackData: fmt.Sprintf("back:%s_%d", cbData.AppID, cbData.UserID)},
 			},
 		},
 	}

@@ -235,9 +235,37 @@ type SteamOwnedGamesResponse struct {
 }
 
 type SteamUserInfo struct {
+	SteamID   string
 	Summary   SteamPlayerSummary
 	Level     int
 	GameCount int
+}
+
+// ----- Steam Profile Items Types -----
+
+// SteamCDN is the base URL for Steam community assets
+const SteamCDN = "https://shared.akamai.steamstatic.com/community_assets/images/"
+
+type ProfileItemsResponse struct {
+	Response ProfileItems `json:"response"`
+}
+
+type ProfileItems struct {
+	ProfileBackground     ProfileItem `json:"profile_background"`
+	MiniProfileBackground ProfileItem `json:"mini_profile_background"`
+	AvatarFrame           ProfileItem `json:"avatar_frame"`
+	AnimatedAvatar        ProfileItem `json:"animated_avatar"`
+}
+
+type ProfileItem struct {
+	CommunityItemID string `json:"communityitemid"`
+	ImageLarge      string `json:"image_large"`
+	ImageSmall      string `json:"image_small"`
+	Name            string `json:"name"`
+	ItemTitle       string `json:"item_title"`
+	AppID           int    `json:"appid"`
+	MovieWebm       string `json:"movie_webm"`
+	MovieMp4        string `json:"movie_mp4"`
 }
 
 // ----- API Functions -----
@@ -416,8 +444,22 @@ func GetSteamUserInfo(apiKey, username string) (*SteamUserInfo, error) {
 	gameCount, _ := GetSteamOwnedGamesCount(apiKey, steamID)
 
 	return &SteamUserInfo{
+		SteamID:   steamID,
 		Summary:   *summary,
 		Level:     level,
 		GameCount: gameCount,
 	}, nil
+}
+
+// GetProfileItemsEquipped fetches the equipped profile items (background, frame, etc.) for a user
+func GetProfileItemsEquipped(apiKey, steamID string) (*ProfileItems, error) {
+	apiURL := fmt.Sprintf("https://api.steampowered.com/IPlayerService/GetProfileItemsEquipped/v1/?steamid=%s&key=%s",
+		steamID, apiKey)
+
+	var response ProfileItemsResponse
+	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
+		return nil, fmt.Errorf("fetching profile items: %w", err)
+	}
+
+	return &response.Response, nil
 }

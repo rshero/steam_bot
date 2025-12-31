@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"steam_bot/config"
+	"steam_bot/images"
 	"steam_bot/steam"
 	"steam_bot/templates"
+	"steam_bot/utils"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -217,46 +219,49 @@ func handleMySteamInlineQuery(b *gotgbot.Bot, ctx *ext.Context, cmd string, user
 
 	inlineCmd := templates.InlineCommands["mysteam"]
 
-	var result gotgbot.InlineQueryResultArticle
+	var results []gotgbot.InlineQueryResult
 
 	if !hasUsername || username == "" {
 		// No username provided - show help with switch inline button
 		switchQuery := ".mysteam "
-		result = gotgbot.InlineQueryResultArticle{
-			Id:           "mysteam_help",
-			Title:        inlineCmd.Title,
-			Description:  inlineCmd.Description,
-			ThumbnailUrl: inlineCmd.ThumbnailUrl,
-			InputMessageContent: gotgbot.InputTextMessageContent{
-				MessageText: inlineCmd.Message,
-				ParseMode:   "HTML",
-			},
-			ReplyMarkup: &gotgbot.InlineKeyboardMarkup{
-				InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-					{{Text: "Enter username", SwitchInlineQueryCurrentChat: &switchQuery}},
+		results = []gotgbot.InlineQueryResult{
+			gotgbot.InlineQueryResultArticle{
+				Id:           "mysteam_help",
+				Title:        inlineCmd.Title,
+				Description:  inlineCmd.Description,
+				ThumbnailUrl: inlineCmd.ThumbnailUrl,
+				InputMessageContent: gotgbot.InputTextMessageContent{
+					MessageText: inlineCmd.Message,
+					ParseMode:   "HTML",
+				},
+				ReplyMarkup: &gotgbot.InlineKeyboardMarkup{
+					InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+						{{Text: "Enter username", SwitchInlineQueryCurrentChat: &switchQuery}},
+					},
 				},
 			},
 		}
 	} else {
-		// Username provided - show result with callback button to fetch details
-		result = gotgbot.InlineQueryResultArticle{
-			Id:           "mysteam_" + username,
-			Title:        fmt.Sprintf("Lookup: %s", username),
-			Description:  "Click to fetch Steam profile",
-			ThumbnailUrl: inlineCmd.ThumbnailUrl,
-			InputMessageContent: gotgbot.InputTextMessageContent{
-				MessageText: fmt.Sprintf("<b>Steam Profile: %s</b>\n\nClick the button below to fetch profile details.", username),
-				ParseMode:   "HTML",
-			},
-			ReplyMarkup: &gotgbot.InlineKeyboardMarkup{
-				InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-					{{Text: "Fetch Profile", CallbackData: fmt.Sprintf("mysteam:%s_%d", username, userID)}},
+		// Username provided - show photo result with callback button to fetch details
+		// Using a placeholder image that will be replaced with the generated profile card
+		results = []gotgbot.InlineQueryResult{
+			gotgbot.InlineQueryResultPhoto{
+				Id:           "mysteam_" + username,
+				PhotoUrl:     inlineCmd.ThumbnailUrl,
+				ThumbnailUrl: inlineCmd.ThumbnailUrl,
+				Title:        fmt.Sprintf("Lookup: %s", username),
+				Caption:      fmt.Sprintf("<b>Steam Profile: %s</b>\n\nClick the button below to fetch profile details.", username),
+				ParseMode:    "HTML",
+				ReplyMarkup: &gotgbot.InlineKeyboardMarkup{
+					InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+						{{Text: "Fetch Profile", CallbackData: fmt.Sprintf("mysteam:%s_%d", username, userID)}},
+					},
 				},
 			},
 		}
 	}
 
-	_, err := ctx.InlineQuery.Answer(b, []gotgbot.InlineQueryResult{result}, &gotgbot.AnswerInlineQueryOpts{
+	_, err := ctx.InlineQuery.Answer(b, results, &gotgbot.AnswerInlineQueryOpts{
 		CacheTime: 60,
 	})
 	return err
@@ -601,20 +606,94 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 		return nil
 	}
 
-	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Fetching profile..."})
+	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Generating profile card..."})
 
 	// Fetch user info
 	userInfo, err := steam.GetSteamUserInfo(cfg.SteamAPIKey, username)
 	if err != nil {
 		log.Println("Error getting Steam user info:", err)
-		_, _, _ = b.EditMessageText(fmt.Sprintf("<b>Error:</b> User not found: %s", username), &gotgbot.EditMessageTextOpts{
+		_, _, _ = b.EditMessageCaption(&gotgbot.EditMessageCaptionOpts{
 			InlineMessageId: ctx.CallbackQuery.InlineMessageId,
+			Caption:         fmt.Sprintf("<b>Error:</b> User not found: %s", username),
 			ParseMode:       "HTML",
 		})
 		return nil
 	}
 
-	// Format and send the profile
+	// Fetch profile items (background, frame)
+	profileItems, _ := steam.GetProfileItemsEquipped(cfg.SteamAPIKey, userInfo.SteamID)
+
+	// Build image generation options
+	opts := images.ProfileCardOptions{
+		AvatarURL: userInfo.Summary.Avatar,
+		Username:  userInfo.Summary.PersonaName,
+		Level:     userInfo.Level,
+		GameCount: userInfo.GameCount,
+		Status:    personaStateToString(userInfo.Summary.PersonaState),
+	}
+
+	// Add background and frame URLs if available
+	if profileItems != nil {
+		if profileItems.ProfileBackground.ImageLarge != "" {
+			opts.BackgroundURL = steam.SteamCDN + profileItems.ProfileBackground.ImageLarge
+		}
+		if profileItems.AvatarFrame.ImageLarge != "" {
+			opts.FrameURL = steam.SteamCDN + profileItems.AvatarFrame.ImageLarge
+		}
+	}
+
+	// Generate profile card
+	log.Printf("[DEBUG] Generating profile card for %s", opts.Username)
+	log.Printf("[DEBUG] BackgroundURL: %s", opts.BackgroundURL)
+	log.Printf("[DEBUG] AvatarURL: %s", opts.AvatarURL)
+	log.Printf("[DEBUG] FrameURL: %s", opts.FrameURL)
+
+	cardBytes, err := images.GenerateProfileCard(opts)
+	if err != nil {
+		log.Println("Error generating profile card:", err)
+		// Fallback to text-only response
+		return sendTextProfileFallback(b, ctx, userInfo)
+	}
+
+	log.Printf("[DEBUG] Generated card size: %d bytes", len(cardBytes))
+
+	// Upload to 0x0.st (required for inline message media editing)
+	imageURL, err := utils.UploadImage(cardBytes, "profile.jpg")
+	if err != nil {
+		log.Printf("Error uploading image: %v", err)
+		return sendTextProfileFallback(b, ctx, userInfo)
+	}
+	log.Printf("[DEBUG] Uploaded image: %s", imageURL)
+
+	// Build reply markup
+	replyMarkup := gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{{Text: "View Profile", Url: userInfo.Summary.ProfileURL}},
+		},
+	}
+
+	// Format caption
+	caption := formatProfileCaption(userInfo)
+
+	// Edit message with the generated profile card image
+	_, _, err = b.EditMessageMedia(gotgbot.InputMediaPhoto{
+		Media:     gotgbot.InputFileByURL(imageURL),
+		Caption:   caption,
+		ParseMode: "HTML",
+	}, &gotgbot.EditMessageMediaOpts{
+		InlineMessageId: ctx.CallbackQuery.InlineMessageId,
+		ReplyMarkup:     replyMarkup,
+	})
+
+	if err != nil {
+		log.Printf("[DEBUG] EditMessageMedia error: %v", err)
+	}
+
+	return err
+}
+
+// sendTextProfileFallback sends a text-only profile when image generation fails
+func sendTextProfileFallback(b *gotgbot.Bot, ctx *ext.Context, userInfo *steam.SteamUserInfo) error {
 	msg := templates.FormatSteamUserProfile(
 		userInfo.Summary.PersonaName,
 		userInfo.Summary.ProfileURL,
@@ -631,12 +710,45 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 		},
 	}
 
-	_, _, err = b.EditMessageText(msg, &gotgbot.EditMessageTextOpts{
+	_, _, err := b.EditMessageCaption(&gotgbot.EditMessageCaptionOpts{
 		InlineMessageId: ctx.CallbackQuery.InlineMessageId,
+		Caption:         msg,
 		ParseMode:       "HTML",
 		ReplyMarkup:     replyMarkup,
 	})
 	return err
+}
+
+// formatProfileCaption formats the caption for the profile card image
+func formatProfileCaption(userInfo *steam.SteamUserInfo) string {
+	return fmt.Sprintf("<b>%s</b>\nStatus: %s | Level: %d | Games: %d",
+		userInfo.Summary.PersonaName,
+		personaStateToString(userInfo.Summary.PersonaState),
+		userInfo.Level,
+		userInfo.GameCount,
+	)
+}
+
+// personaStateToString converts Steam persona state to human readable string
+func personaStateToString(state int) string {
+	switch state {
+	case 0:
+		return "Offline"
+	case 1:
+		return "Online"
+	case 2:
+		return "Busy"
+	case 3:
+		return "Away"
+	case 4:
+		return "Snooze"
+	case 5:
+		return "Looking to trade"
+	case 6:
+		return "Looking to play"
+	default:
+		return "Unknown"
+	}
 }
 
 func parseCallbackData(data string) (CallbackData, error) {

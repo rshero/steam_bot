@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strconv"
@@ -25,6 +26,7 @@ var (
 	sentPostsMu    sync.RWMutex
 	maxCacheSize   = 200
 	cleanupPercent = 0.5
+	initialized    = false
 )
 
 // ----- Bot Initialization -----
@@ -75,7 +77,7 @@ func checkAndSendDeals(b *gotgbot.Bot, channelID int64) {
 	}
 
 	for _, deal := range deals {
-		if isAlreadySent(deal.DealID) {
+		if isAlreadySent(context.Background(), deal.DealID) {
 			continue
 		}
 
@@ -84,7 +86,7 @@ func checkAndSendDeals(b *gotgbot.Bot, channelID int64) {
 			continue
 		}
 
-		markAsSent(deal.DealID)
+		markAsSent(context.Background(), deal.DealID)
 		time.Sleep(2 * time.Second)
 	}
 }
@@ -104,17 +106,45 @@ func initializeDealsCache(deals []steam.CheapSharkDeal) bool {
 		sentPosts[deal.DealID] = time.Now()
 	}
 	log.Printf("Initialized sent posts cache with %d items", len(deals))
+
+	if !initialized {
+		if db := steam.GetDatabase(); db != nil {
+			err := db.InitializeSentPostsFromMap(context.Background(), sentPosts)
+			if err != nil {
+				log.Printf("Error initializing sent posts in database: %v", err)
+			} else {
+				log.Printf("Migrated %d sent posts to database", len(sentPosts))
+			}
+		}
+		initialized = true
+	}
+
 	return true
 }
 
-func isAlreadySent(dealID string) bool {
+func isAlreadySent(ctx context.Context, dealID string) bool {
+	if db := steam.GetDatabase(); db != nil {
+		sent, err := db.IsSentPost(ctx, dealID)
+		if err == nil {
+			return sent
+		}
+		log.Printf("Error checking sent post from database: %v", err)
+	}
+
 	sentPostsMu.RLock()
 	defer sentPostsMu.RUnlock()
 	_, exists := sentPosts[dealID]
 	return exists
 }
 
-func markAsSent(dealID string) {
+func markAsSent(ctx context.Context, dealID string) {
+	if db := steam.GetDatabase(); db != nil {
+		err := db.MarkSentPost(ctx, dealID)
+		if err != nil {
+			log.Printf("Error marking sent post in database: %v", err)
+		}
+	}
+
 	sentPostsMu.Lock()
 	defer sentPostsMu.Unlock()
 	sentPosts[dealID] = time.Now()
@@ -465,6 +495,7 @@ const (
 	CallbackRequirements
 	CallbackHLTB
 	CallbackMySteam
+	CallbackMySteamRefresh
 	CallbackBack
 )
 
@@ -488,18 +519,23 @@ func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config) e
 		return nil
 	}
 
-	// Verify user authorization
+	// Handle mysteam callback separately (doesn't need app details or user verification)
+	if cbData.Type == CallbackMySteam {
+		return handleMySteamCallback(b, ctx, cbData, cfg)
+	}
+
+	// Handle mysteam refresh callback (clears cache and regenerates)
+	if cbData.Type == CallbackMySteamRefresh {
+		return handleMySteamRefreshCallback(b, ctx, cbData, cfg)
+	}
+
+	// Verify user authorization for game-related callbacks
 	if cbData.UserID != ctx.CallbackQuery.From.Id {
 		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
 			Text:      "This is not for you",
 			ShowAlert: true,
 		})
 		return nil
-	}
-
-	// Handle mysteam callback separately (doesn't need app details)
-	if cbData.Type == CallbackMySteam {
-		return handleMySteamCallback(b, ctx, cbData, cfg)
 	}
 
 	// Handle back callback (uses cache to restore original view)
@@ -575,6 +611,28 @@ func handleBackCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData) e
 	return sendCallbackResponse(b, ctx, msg, *replyMarkup)
 }
 
+func handleMySteamRefreshCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData, cfg *config.Config) error {
+	username := cbData.AppID // AppID field holds the username for mysteam_refresh
+
+	// log.Printf("[DEBUG] Refresh requested for username: %s", username)
+
+	// Clear the cached entry to force regeneration
+	if db := steam.GetDatabase(); db != nil {
+		ctx2 := context.Background()
+		err := db.ClearProfileCardCache(ctx2, username)
+		if err != nil {
+			// log.Printf("[DEBUG] Error clearing cache for %s: %v", username, err)
+		} else {
+			// log.Printf("[DEBUG] Cleared cache for username %s", username)
+		}
+	}
+
+	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Refreshing profile card..."})
+
+	// Now handle it as a regular mysteam callback which will regenerate
+	return handleMySteamCallback(b, ctx, cbData, cfg)
+}
+
 func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData, cfg *config.Config) error {
 	username := cbData.AppID // AppID field holds the username for mysteam
 
@@ -608,8 +666,8 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 
 	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Generating profile card..."})
 
-	// Fetch user info
-	userInfo, err := steam.GetSteamUserInfo(cfg.SteamAPIKey, username)
+	// Fetch user info with caching
+	userInfo, profileItems, status, cachedImageURL, err := steam.GetProfileCardData(context.Background(), cfg.SteamAPIKey, username)
 	if err != nil {
 		log.Println("Error getting Steam user info:", err)
 		_, _, _ = b.EditMessageCaption(&gotgbot.EditMessageCaptionOpts{
@@ -620,8 +678,11 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 		return nil
 	}
 
-	// Fetch profile items (background, frame)
-	profileItems, _ := steam.GetProfileItemsEquipped(cfg.SteamAPIKey, userInfo.SteamID)
+	// If we have a cached image URL, use it directly
+	if cachedImageURL != "" {
+		// log.Printf("[DEBUG] Using cached image URL: %s", cachedImageURL)
+		return sendProfileCardWithImage(b, ctx, userInfo, cachedImageURL)
+	}
 
 	// Build image generation options
 	opts := images.ProfileCardOptions{
@@ -633,7 +694,7 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 		GamesPlayed:  userInfo.GamesPlayed,
 		TotalHours:   userInfo.TotalHours,
 		AccountValue: userInfo.AccountValue,
-		Status:       personaStateToString(userInfo.Summary.PersonaState),
+		Status:       status,
 	}
 
 	// Add background and frame URLs if available
@@ -647,10 +708,10 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 	}
 
 	// Generate profile card
-	log.Printf("[DEBUG] Generating profile card for %s", opts.Username)
-	log.Printf("[DEBUG] BackgroundURL: %s", opts.BackgroundURL)
-	log.Printf("[DEBUG] AvatarURL: %s", opts.AvatarURL)
-	log.Printf("[DEBUG] FrameURL: %s", opts.FrameURL)
+	// log.Printf("[DEBUG] Generating profile card for %s", opts.Username)
+	// log.Printf("[DEBUG] BackgroundURL: %s", opts.BackgroundURL)
+	// log.Printf("[DEBUG] AvatarURL: %s", opts.AvatarURL)
+	// log.Printf("[DEBUG] FrameURL: %s", opts.FrameURL)
 
 	cardBytes, err := images.GenerateProfileCard(opts)
 	if err != nil {
@@ -659,32 +720,53 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 		return sendTextProfileFallback(b, ctx, userInfo)
 	}
 
-	log.Printf("[DEBUG] Generated card size: %d bytes", len(cardBytes))
+	// log.Printf("[DEBUG] Generated card size: %d bytes", len(cardBytes))
 
 	// Upload to imgbb first (fast and reliable), fallback to catbox
 	imageURL, err := utils.UploadImageToImgBB(cardBytes, "profile.png")
 	if err != nil {
-		log.Printf("[DEBUG] imgbb upload failed, trying catbox: %v", err)
+		// log.Printf("[DEBUG] imgbb upload failed, trying catbox: %v", err)
 		imageURL, err = utils.UploadImage(cardBytes, "profile.png")
 		if err != nil {
 			log.Printf("Error uploading image: %v", err)
 			return sendTextProfileFallback(b, ctx, userInfo)
 		}
 	}
-	log.Printf("[DEBUG] Uploaded image: %s", imageURL)
+	// log.Printf("[DEBUG] Uploaded image: %s", imageURL)
 
-	// Build reply markup
+	// Cache the uploaded image URL
+	err = steam.UpdateProfileCardImage(context.Background(), username, userInfo.SteamID, userInfo, profileItems, status, imageURL)
+	if err != nil {
+		// log.Printf("[DEBUG] Error caching image URL: %v", err)
+	} else {
+		// log.Printf("[DEBUG] Cached image URL for username %s", username)
+	}
+
+	return sendProfileCardWithImage(b, ctx, userInfo, imageURL)
+}
+
+// sendProfileCardWithImage sends profile card using an existing image URL
+func sendProfileCardWithImage(b *gotgbot.Bot, ctx *ext.Context, userInfo *steam.SteamUserInfo, imageURL string) error {
+	// Build reply markup with View Profile and Refresh buttons
 	replyMarkup := gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "View Profile", Url: userInfo.Summary.ProfileURL}},
+			{
+				{Text: "View Profile", Url: userInfo.Summary.ProfileURL},
+				{Text: "🔄 Refresh", CallbackData: fmt.Sprintf("mysteam_refresh:%s", userInfo.Summary.PersonaName)},
+			},
 		},
 	}
 
 	// Format caption
 	caption := formatProfileCaption(userInfo)
 
+	// log.Printf("[DEBUG] Attempting to edit message with image URL: %s", imageURL)
+	// log.Printf("[DEBUG] Reply markup: %+v", replyMarkup)
+	// log.Printf("[DEBUG] Caption length: %d", len(caption))
+	// log.Printf("[DEBUG] InlineMessageId: %s", ctx.CallbackQuery.InlineMessageId)
+
 	// Edit message with the generated profile card image
-	_, _, err = b.EditMessageMedia(gotgbot.InputMediaPhoto{
+	_, _, err := b.EditMessageMedia(gotgbot.InputMediaPhoto{
 		Media:     gotgbot.InputFileByURL(imageURL),
 		Caption:   caption,
 		ParseMode: "HTML",
@@ -694,7 +776,7 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 	})
 
 	if err != nil {
-		log.Printf("[DEBUG] EditMessageMedia error: %v", err)
+		log.Printf("Error editing message media: %v", err)
 	}
 
 	return err
@@ -763,12 +845,13 @@ func parseCallbackData(data string) (CallbackData, error) {
 	result := CallbackData{}
 
 	prefixes := map[string]CallbackType{
-		"details:":      CallbackDetails,
-		"more_details:": CallbackDetails, // Support legacy format
-		"requirements:": CallbackRequirements,
-		"hltb:":         CallbackHLTB,
-		"mysteam:":      CallbackMySteam,
-		"back:":         CallbackBack,
+		"details:":         CallbackDetails,
+		"more_details:":    CallbackDetails, // Support legacy format
+		"requirements:":    CallbackRequirements,
+		"hltb:":            CallbackHLTB,
+		"mysteam:":         CallbackMySteam,
+		"mysteam_refresh:": CallbackMySteamRefresh,
+		"back:":            CallbackBack,
 	}
 
 	var payload string
@@ -781,6 +864,12 @@ func parseCallbackData(data string) (CallbackData, error) {
 	}
 
 	if result.Type == CallbackUnknown {
+		return result, nil
+	}
+
+	// Special handling for mysteam callbacks (username only, no userID)
+	if result.Type == CallbackMySteam || result.Type == CallbackMySteamRefresh {
+		result.AppID = payload // Username goes in AppID field
 		return result, nil
 	}
 
@@ -852,7 +941,7 @@ func handleDetailsCallback(cbData CallbackData, details *steam.SteamAppDetails) 
 }
 
 func handleRequirementsCallback(cbData CallbackData, details *steam.SteamAppDetails) (string, gotgbot.InlineKeyboardMarkup) {
-	reqs := details.GetPcRequirements()
+	reqs := steam.GetRequirementsWithCache(context.Background(), cbData.AppID, details)
 	msg := templates.FormatRequirementsMessage(details.Name, reqs.Minimum, reqs.Recommended)
 
 	replyMarkup := gotgbot.InlineKeyboardMarkup{
@@ -875,7 +964,7 @@ func handleRequirementsCallback(cbData CallbackData, details *steam.SteamAppDeta
 func handleHLTBCallback(cbData CallbackData, details *steam.SteamAppDetails) (string, gotgbot.InlineKeyboardMarkup) {
 	reviews := fetchReviews(cbData.AppID)
 
-	hltbResult, err := steam.GetHltbData(details.Name)
+	hltbResult, err := steam.GetHltbData(context.Background(), cbData.AppID, details.Name)
 	if err != nil {
 		log.Println("Error getting HLTB data:", err)
 		return "", gotgbot.InlineKeyboardMarkup{}
@@ -916,7 +1005,7 @@ func handleHLTBCallback(cbData CallbackData, details *steam.SteamAppDetails) (st
 }
 
 func fetchReviews(appID string) *steam.SteamReviewSummary {
-	reviews, err := steam.GetSteamAppReviews(appID)
+	reviews, err := steam.GetSteamAppReviews(context.Background(), appID)
 	if err != nil {
 		log.Println("Error getting reviews:", err)
 		return &steam.SteamReviewSummary{}

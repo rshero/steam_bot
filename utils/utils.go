@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	// "log"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -159,11 +160,16 @@ func UploadImageToImgBB(data []byte, filename string) (string, error) {
 		StatusCode int    `json:"status_code"`
 		StatusTxt  string `json:"status_txt"`
 		Image      struct {
-			URL string `json:"url"`
+			URL        string `json:"url"`         // Page URL
+			DisplayURL string `json:"display_url"` // Direct image URL
 		} `json:"image"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	// log.Printf("[DEBUG] ImgBB response: %s", string(bodyBytes))
+
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return "", fmt.Errorf("decoding response: %w", err)
 	}
 
@@ -171,9 +177,17 @@ func UploadImageToImgBB(data []byte, filename string) (string, error) {
 		return "", fmt.Errorf("imgbb error: %s", result.StatusTxt)
 	}
 
-	if result.Image.URL == "" {
+	// Prefer display_url (direct image) over url (page)
+	imageURL := result.Image.DisplayURL
+	if imageURL == "" {
+		imageURL = result.Image.URL
+	}
+
+	if imageURL == "" {
 		return "", fmt.Errorf("no image URL in response")
 	}
 
-	return result.Image.URL, nil
+	// log.Printf("[DEBUG] ImgBB returned URL: %s (display_url: %s, url: %s)", imageURL, result.Image.DisplayURL, result.Image.URL)
+
+	return imageURL, nil
 }

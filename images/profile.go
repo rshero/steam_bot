@@ -90,7 +90,7 @@ type ProfileCardOptions struct {
 	GameCount     int     // Total games owned
 	GamesPlayed   int     // Games with playtime > 0
 	TotalHours    float64 // Total hours across all games
-	AccountValue  int     // Estimated account value
+	AccountValue  string  // Estimated account value with currency symbol or placeholder
 	Status        string  // Online status
 }
 
@@ -316,8 +316,15 @@ func drawLevelStats(dc *advancegg.Context, opts ProfileCardOptions) error {
 		return err
 	}
 
-	statsText := fmt.Sprintf("Level %d | %s | %d Games",
-		opts.Level, opts.CountryCode, opts.GameCount)
+	// Build stats text, skip country if empty
+	var statsText string
+	if opts.CountryCode != "" {
+		statsText = fmt.Sprintf("Level %d | %s | %d Games",
+			opts.Level, opts.CountryCode, opts.GameCount)
+	} else {
+		statsText = fmt.Sprintf("Level %d | %d Games",
+			opts.Level, opts.GameCount)
+	}
 
 	adjustedY := LevelTextY + 26
 
@@ -418,7 +425,7 @@ func drawHoursSection(dc *advancegg.Context, hours float64) error {
 }
 
 // drawValueSection draws the account value section
-func drawValueSection(dc *advancegg.Context, value int) error {
+func drawValueSection(dc *advancegg.Context, value string) error {
 	img := dc.Image().(*image.RGBA)
 
 	face, err := loadFont(FontSizeStats)
@@ -435,12 +442,22 @@ func drawValueSection(dc *advancegg.Context, value int) error {
 		Face: face,
 	}
 
-	drawer.Dot = fixed.P(ValueLabelX, adjustedLabelY)
-	drawer.DrawString("Value")
+	// Right edge should be at x=CardWidth - 30 (30px margin from right edge)
+	rightEdge := CardWidth - 30
 
-	valueText := fmt.Sprintf("\u20B9 %d", value)
-	drawer.Dot = fixed.P(ValueAmountX, adjustedAmountY)
-	drawer.DrawString(valueText)
+	// Right-align value amount
+	valueWidth := font.MeasureString(face, value)
+	valueX := rightEdge - int(valueWidth>>6)
+	drawer.Dot = fixed.P(valueX, adjustedAmountY)
+	drawer.DrawString(value)
+
+	// Center-align "Value" label above the value amount
+	labelWidth := font.MeasureString(face, "Value")
+	// Calculate center position: valueX is left edge, valueWidth is width of value
+	valueCenterX := valueX + int(valueWidth>>6)/2
+	labelX := valueCenterX - int(labelWidth>>6)/2
+	drawer.Dot = fixed.P(labelX, adjustedLabelY)
+	drawer.DrawString("Value")
 
 	return nil
 }

@@ -692,8 +692,7 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 	// If we have a cached image URL, use it directly
 	if cachedImageURL != "" {
 		// Check if it's a file_id (prefixed with "file_id:")
-		if strings.HasPrefix(cachedImageURL, "file_id:") {
-			fileID := strings.TrimPrefix(cachedImageURL, "file_id:")
+		if fileID, ok := strings.CutPrefix(cachedImageURL, "file_id:"); ok {
 			log.Printf("Using cached file_id: %s", fileID)
 			return sendProfileCardWithFileID(b, ctx, userInfo, fileID)
 		}

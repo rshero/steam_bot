@@ -625,11 +625,15 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 
 	// Build image generation options
 	opts := images.ProfileCardOptions{
-		AvatarURL: userInfo.Summary.Avatar,
-		Username:  userInfo.Summary.PersonaName,
-		Level:     userInfo.Level,
-		GameCount: userInfo.GameCount,
-		Status:    personaStateToString(userInfo.Summary.PersonaState),
+		AvatarURL:    userInfo.Summary.Avatar,
+		Username:     userInfo.Summary.PersonaName,
+		Level:        userInfo.Level,
+		CountryCode:  userInfo.Summary.CountryCode,
+		GameCount:    userInfo.GameCount,
+		GamesPlayed:  userInfo.GamesPlayed,
+		TotalHours:   userInfo.TotalHours,
+		AccountValue: userInfo.AccountValue,
+		Status:       personaStateToString(userInfo.Summary.PersonaState),
 	}
 
 	// Add background and frame URLs if available
@@ -657,11 +661,15 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 
 	log.Printf("[DEBUG] Generated card size: %d bytes", len(cardBytes))
 
-	// Upload to 0x0.st (required for inline message media editing)
-	imageURL, err := utils.UploadImage(cardBytes, "profile.jpg")
+	// Upload to imgbb first (fast and reliable), fallback to catbox
+	imageURL, err := utils.UploadImageToImgBB(cardBytes, "profile.jpg")
 	if err != nil {
-		log.Printf("Error uploading image: %v", err)
-		return sendTextProfileFallback(b, ctx, userInfo)
+		log.Printf("[DEBUG] imgbb upload failed, trying catbox: %v", err)
+		imageURL, err = utils.UploadImage(cardBytes, "profile.jpg")
+		if err != nil {
+			log.Printf("Error uploading image: %v", err)
+			return sendTextProfileFallback(b, ctx, userInfo)
+		}
 	}
 	log.Printf("[DEBUG] Uploaded image: %s", imageURL)
 

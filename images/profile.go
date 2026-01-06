@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"os"
 	"steam_bot/utils"
 
@@ -15,29 +16,59 @@ import (
 )
 
 const (
-	// Card dimensions (16:9)
-	CardWidth  = 1280
-	CardHeight = 720
+	// Card dimensions from Figma (985×554)
+	CardWidth  = 985
+	CardHeight = 554
 
-	// Avatar settings (40% larger than original 150 -> 210)
-	AvatarSize = 210
+	// Figma coordinate offset (to convert from Figma coords to absolute)
+	FigmaOffsetX = 547
+	FigmaOffsetY = 284
 
-	// Stats bar settings (doubled height: 140 -> 280, at bottom)
-	StatsBarHeight  = 280
-	StatsBarY       = CardHeight - StatsBarHeight
-	StatsBarOpacity = 0.75
+	// Avatar settings from Figma (184×184)
+	AvatarSize = 184
+	AvatarX    = 61  // Figma: -486 + 547
+	AvatarY    = 277 // Figma: -7 + 284
 
-	// Avatar position (on the stats bar, moved up 40%)
-	AvatarX = 50
-	AvatarY = StatsBarY - 35 - (int(float64(AvatarSize) * 0.4)) // Moved up 40% of avatar size
+	// Status indicator (on avatar)
+	StatusIndicatorSize = 25
+	StatusIndicatorX    = 228 // Figma: -319 + 547
+	StatusIndicatorY    = 271 // Figma: -13 + 284
 
-	// Font paths (relative to project root)
-	FontPathRegular = "./assets/fonts/OpenSans-Regular.ttf"
-	FontPathBold    = "./assets/fonts/OpenSans-Bold.ttf"
+	// Stats bar settings from Figma (985×170 at y=384)
+	StatsBarHeight = 170
+	StatsBarY      = 384 // Figma: 100 + 284
+	StatsBarBlur   = 46.8
+	StatsBarAlpha  = 220 // 60% opacity = 153/255
 
-	// Font sizes (in points)
-	FontSizeUsername = 40
-	FontSizeStats    = 28
+	// Font paths (BubblegumSans from Figma)
+	FontPath = "./assets/fonts/BubblegumSans-Regular.ttf"
+
+	// Font sizes from Figma
+	FontSizeUsername    = 36
+	FontSizeStats       = 32
+	FontSizeGamesPlayed = 20
+
+	// Text positions from Figma
+	UsernameX    = 103 // Figma: -444 + 547
+	UsernameY    = 499 // Figma: 195 + 284
+	LevelTextX   = 261 // Figma: -286 + 547
+	LevelTextY   = 414 // Figma: 130 + 284
+	ProgressBarX = 261 // Figma: -286 + 547
+	ProgressBarY = 463 // Figma: 189 + 284
+	GamesPlayedX = 261 // Figma: -286 + 547
+	GamesPlayedY = 480 // Figma: 196 + 284
+	HoursValueX  = 680 // Figma: 133 + 547
+	HoursValueY  = 414 // Figma: 130 + 284
+	HoursLabelX  = 625 // Figma: 64 + 547
+	HoursLabelY  = 451 // Figma: 167 + 284
+	ValueLabelX  = 898 // Figma: 305 + 547
+	ValueLabelY  = 406 // Figma: 122 + 284
+	ValueAmountX = 893 // Figma: 300 + 547
+	ValueAmountY = 451 // Figma: 167 + 284
+
+	// Progress bar settings
+	ProgressBarWidth  = 290 // estimated
+	ProgressBarHeight = 7   // from Figma
 )
 
 // Default background color (Steam's dark blue)
@@ -50,14 +81,23 @@ type ProfileCardOptions struct {
 	FrameURL      string // optional, empty if no frame
 	Username      string
 	Level         int
-	GameCount     int
-	Status        string
+	CountryCode   string
+	GameCount     int     // Total games owned
+	GamesPlayed   int     // Games with playtime > 0
+	TotalHours    float64 // Total hours across all games
+	AccountValue  int     // Estimated account value
+	Status        string  // Online status
 }
 
 // GenerateProfileCard creates a profile card image and returns JPEG bytes
 func GenerateProfileCard(opts ProfileCardOptions) ([]byte, error) {
-	// Create the drawing context
+	// Create the drawing context with new Figma dimensions
 	dc := advancegg.NewContext(CardWidth, CardHeight)
+
+	fmt.Printf("\n[DEBUG] ===== Profile Card Generation =====\n")
+	fmt.Printf("[DEBUG] Card dimensions: %dx%d\n", CardWidth, CardHeight)
+	fmt.Printf("[DEBUG] Stats bar: Y=%d, Height=%d (from %d to %d)\n", StatsBarY, StatsBarHeight, StatsBarY, StatsBarY+StatsBarHeight)
+	fmt.Printf("[DEBUG] Avatar: pos=(%d,%d), size=%d\n", AvatarX, AvatarY, AvatarSize)
 
 	// 1. Draw background
 	if err := drawBackground(dc, opts.BackgroundURL); err != nil {
@@ -66,24 +106,47 @@ func GenerateProfileCard(opts ProfileCardOptions) ([]byte, error) {
 		dc.Clear()
 	}
 
-	// 2. Draw semi-transparent stats bar
+	// 2. Draw semi-transparent blurred stats bar
 	drawStatsBar(dc)
 
-	// 3. Draw avatar (with frame if available)
-	if err := drawAvatar(dc, opts.AvatarURL, opts.FrameURL); err != nil {
+	// 3. Draw avatar with drop shadow and frame
+	if err := drawAvatar(dc, opts.AvatarURL, opts.FrameURL, opts.Status); err != nil {
 		// Continue without avatar if it fails
 		fmt.Printf("Failed to draw avatar: %v\n", err)
 	}
 
-	// 4. Draw stats text
-	if err := drawStats(dc, opts); err != nil {
-		fmt.Printf("Failed to draw stats: %v\n", err)
+	// 4. Draw username below avatar
+	if err := drawUsername(dc, opts.Username); err != nil {
+		fmt.Printf("Failed to draw username: %v\n", err)
 	}
 
-	// 5. Encode to PNG (better quality for text)
+	// 5. Draw stats (Level | Country | Games)
+	if err := drawLevelStats(dc, opts); err != nil {
+		fmt.Printf("Failed to draw level stats: %v\n", err)
+	}
+
+	// 6. Draw progress bar
+	drawProgressBar(dc, opts.GamesPlayed, opts.GameCount)
+
+	// 7. Draw "X out of Y games played" text
+	if err := drawGamesPlayedText(dc, opts.GamesPlayed, opts.GameCount); err != nil {
+		fmt.Printf("Failed to draw games played text: %v\n", err)
+	}
+
+	// 8. Draw hours section
+	if err := drawHoursSection(dc, opts.TotalHours); err != nil {
+		fmt.Printf("Failed to draw hours section: %v\n", err)
+	}
+
+	// 9. Draw value section
+	if err := drawValueSection(dc, opts.AccountValue); err != nil {
+		fmt.Printf("Failed to draw value section: %v\n", err)
+	}
+
+	// 10. Encode to JPEG with quality 85
 	var buf bytes.Buffer
-	if err := dc.EncodePNG(&buf); err != nil {
-		return nil, fmt.Errorf("encoding PNG: %w", err)
+	if err := dc.EncodeJPG(&buf, &jpeg.Options{Quality: 85}); err != nil {
+		return nil, fmt.Errorf("encoding JPEG: %w", err)
 	}
 
 	return buf.Bytes(), nil
@@ -128,15 +191,17 @@ func drawBackground(dc *advancegg.Context, url string) error {
 	return nil
 }
 
-// drawStatsBar draws a semi-transparent dark bar
+// drawStatsBar draws a semi-transparent blurred stats bar
+// Note: True blur effect requires image processing; we'll use high opacity for now
 func drawStatsBar(dc *advancegg.Context) {
-	dc.SetRGBA255(78, 80, 90, 200) // Custom color #4E505A with transparency
+	// Draw the stats bar with color #4E505A at 30% opacity
+	dc.SetRGBA255(78, 80, 90, StatsBarAlpha)
 	dc.DrawRectangle(0, float64(StatsBarY), CardWidth, StatsBarHeight)
 	dc.Fill()
 }
 
-// drawAvatar downloads and draws the avatar, optionally with a frame
-func drawAvatar(dc *advancegg.Context, avatarURL, frameURL string) error {
+// drawAvatar downloads and draws the avatar with drop shadow, frame, and status indicator
+func drawAvatar(dc *advancegg.Context, avatarURL, frameURL, status string) error {
 	if avatarURL == "" {
 		return fmt.Errorf("no avatar URL")
 	}
@@ -152,7 +217,10 @@ func drawAvatar(dc *advancegg.Context, avatarURL, frameURL string) error {
 		return fmt.Errorf("decoding avatar: %w", err)
 	}
 
-	// Draw avatar scaled to AvatarSize
+	// TODO: Add drop shadow effect (requires image processing library)
+	// For now, draw avatar directly
+
+	// Draw avatar scaled to AvatarSize (184×184)
 	avatarBounds := avatarImg.Bounds()
 	avatarScale := float64(AvatarSize) / float64(avatarBounds.Dx())
 
@@ -175,7 +243,7 @@ func drawAvatar(dc *advancegg.Context, avatarURL, frameURL string) error {
 			return nil
 		}
 
-		// Frame should be slightly larger than avatar to surround it
+		// Frame should be slightly larger than avatar
 		frameBounds := frameImg.Bounds()
 		frameScale := float64(AvatarSize+30) / float64(frameBounds.Dx())
 
@@ -186,74 +254,241 @@ func drawAvatar(dc *advancegg.Context, avatarURL, frameURL string) error {
 		dc.Pop()
 	}
 
+	// Draw status indicator (circle on right edge of avatar)
+	drawStatusIndicator(dc, status)
+
 	return nil
 }
 
-// drawStats draws the username and stats text on the stats bar
-func drawStats(dc *advancegg.Context, opts ProfileCardOptions) error {
-	// Get the underlying RGBA image from context
+// drawStatusIndicator draws a status indicator circle
+func drawStatusIndicator(dc *advancegg.Context, status string) {
+	// Determine color based on status
+	var statusColor color.RGBA
+	switch status {
+	case "Online":
+		statusColor = color.RGBA{R: 87, G: 186, B: 115, A: 255} // Green
+	case "Away":
+		statusColor = color.RGBA{R: 237, G: 193, B: 75, A: 255} // Yellow
+	case "Busy":
+		statusColor = color.RGBA{R: 186, G: 87, B: 87, A: 255} // Red
+	default:
+		statusColor = color.RGBA{R: 140, G: 140, B: 140, A: 255} // Gray for offline
+	}
+
+	// Draw stroke (border)
+	dc.SetRGBA255(182, 182, 182, 214) // #B6B6B6 at 84% opacity
+	dc.DrawCircle(float64(StatusIndicatorX+StatusIndicatorSize/2),
+		float64(StatusIndicatorY+StatusIndicatorSize/2),
+		float64(StatusIndicatorSize)/2+2.5) // +2.5 for stroke weight 5
+	dc.Fill()
+
+	// Draw inner circle with status color
+	dc.SetColor(statusColor)
+	dc.DrawCircle(float64(StatusIndicatorX+StatusIndicatorSize/2),
+		float64(StatusIndicatorY+StatusIndicatorSize/2),
+		float64(StatusIndicatorSize)/2)
+	dc.Fill()
+}
+
+// drawUsername draws the username below the avatar
+func drawUsername(dc *advancegg.Context, username string) error {
 	img := dc.Image().(*image.RGBA)
 
-	// Text X position (to the right of avatar) - add small offset to prevent first letter cutoff
-	textX := AvatarX + AvatarSize + 45
-	textY := StatsBarY + 80 // Baseline position for text
-
-	// Load and draw username (bold, larger)
-	fontBytes, err := os.ReadFile(FontPathBold)
+	face, err := loadFont(FontSizeUsername)
 	if err != nil {
-		return fmt.Errorf("reading bold font: %w", err)
+		return err
 	}
 
-	boldFont, err := opentype.Parse(fontBytes)
-	if err != nil {
-		return fmt.Errorf("parsing bold font: %w", err)
-	}
-
-	boldFace, err := opentype.NewFace(boldFont, &opentype.FaceOptions{
-		Size:    FontSizeUsername,
-		DPI:     72,
-		Hinting: font.HintingFull,
-	})
-	if err != nil {
-		return fmt.Errorf("creating bold face: %w", err)
-	}
+	fmt.Printf("[DEBUG] Username '%s' at position (%d, %d)\n", username, UsernameX, UsernameY)
 
 	drawer := &font.Drawer{
 		Dst:  img,
 		Src:  image.NewUniform(color.White),
-		Face: boldFace,
-		Dot:  fixed.P(textX, textY),
+		Face: face,
+		Dot:  fixed.P(UsernameX, UsernameY),
 	}
-	drawer.DrawString(opts.Username)
+	drawer.DrawString(username)
 
-	// Load and draw stats (regular font)
-	fontBytes, err = os.ReadFile(FontPathRegular)
+	return nil
+}
+
+// drawLevelStats draws "Level X | Country | Y Games"
+func drawLevelStats(dc *advancegg.Context, opts ProfileCardOptions) error {
+	img := dc.Image().(*image.RGBA)
+
+	face, err := loadFont(FontSizeStats)
 	if err != nil {
-		return fmt.Errorf("reading regular font: %w", err)
+		return err
 	}
 
-	regularFont, err := opentype.Parse(fontBytes)
+	// Format: "Level 8 | USA | 19 Games"
+	statsText := fmt.Sprintf("Level %d | %s | %d Games",
+		opts.Level, opts.CountryCode, opts.GameCount)
+
+	// Adjust Y position - Figma coord appears to be top of text box, not baseline
+	adjustedY := LevelTextY + 26 // Add ascent for 32pt font
+
+	fmt.Printf("[DEBUG] Level stats '%s' at position (%d, %d -> %d)\n", statsText, LevelTextX, LevelTextY, adjustedY)
+
+	drawer := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(color.White),
+		Face: face,
+		Dot:  fixed.P(LevelTextX, adjustedY),
+	}
+	drawer.DrawString(statsText)
+
+	return nil
+}
+
+// drawProgressBar draws the games progress bar with rounded ends
+func drawProgressBar(dc *advancegg.Context, gamesPlayed, totalGames int) {
+	if totalGames == 0 {
+		return
+	}
+
+	// Calculate progress ratio
+	progress := float64(gamesPlayed) / float64(totalGames)
+	filledWidth := float64(ProgressBarWidth) * progress
+
+	barCenterY := float64(ProgressBarY) + float64(ProgressBarHeight)/2
+
+	fmt.Printf("[DEBUG] Progress bar at (%d, %d), width=%d, height=%d, filled=%.1f%%\n",
+		ProgressBarX, ProgressBarY, ProgressBarWidth, ProgressBarHeight, progress*100)
+
+	// Draw background bar (gray, full width) with rounded ends
+	dc.SetRGBA255(210, 210, 210, 255)
+	dc.SetLineWidth(float64(ProgressBarHeight))
+	dc.SetLineCap(1) // Round cap
+	dc.DrawLine(float64(ProgressBarX), barCenterY,
+		float64(ProgressBarX+ProgressBarWidth), barCenterY)
+	dc.Stroke()
+
+	// Draw filled portion (black) with rounded ends
+	if filledWidth > 0 {
+		dc.SetRGBA255(45, 49, 51, 255)
+		dc.SetLineWidth(float64(ProgressBarHeight))
+		dc.SetLineCap(1) // Round cap
+		dc.DrawLine(float64(ProgressBarX), barCenterY,
+			float64(ProgressBarX)+filledWidth, barCenterY)
+		dc.Stroke()
+	}
+}
+
+// drawGamesPlayedText draws "X out of Y games played"
+func drawGamesPlayedText(dc *advancegg.Context, gamesPlayed, totalGames int) error {
+	img := dc.Image().(*image.RGBA)
+
+	face, err := loadFont(FontSizeGamesPlayed)
 	if err != nil {
-		return fmt.Errorf("parsing regular font: %w", err)
+		return err
 	}
 
-	regularFace, err := opentype.NewFace(regularFont, &opentype.FaceOptions{
-		Size:    FontSizeStats,
+	text := fmt.Sprintf("%d out of %d games played", gamesPlayed, totalGames)
+
+	// Adjust Y position for 20pt font
+	adjustedY := GamesPlayedY + 16 // Add ascent
+
+	fmt.Printf("[DEBUG] Games played '%s' at position (%d, %d -> %d)\n", text, GamesPlayedX, GamesPlayedY, adjustedY)
+
+	drawer := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(color.White),
+		Face: face,
+		Dot:  fixed.P(GamesPlayedX, adjustedY),
+	}
+	drawer.DrawString(text)
+
+	return nil
+}
+
+// drawHoursSection draws the hours wasted section
+func drawHoursSection(dc *advancegg.Context, hours float64) error {
+	img := dc.Image().(*image.RGBA)
+
+	// Draw hours value (large)
+	valueFace, err := loadFont(FontSizeStats)
+	if err != nil {
+		return err
+	}
+
+	hoursValue := fmt.Sprintf("%.1f", hours)
+
+	// Adjust Y positions
+	adjustedValueY := HoursValueY + 26
+	adjustedLabelY := HoursLabelY + 26
+
+	fmt.Printf("[DEBUG] Hours value '%s' at position (%d, %d -> %d)\n", hoursValue, HoursValueX, HoursValueY, adjustedValueY)
+	fmt.Printf("[DEBUG] Hours label 'Hours wasted' at position (%d, %d -> %d)\n", HoursLabelX, HoursLabelY, adjustedLabelY)
+
+	drawer := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(color.White),
+		Face: valueFace,
+		Dot:  fixed.P(HoursValueX, adjustedValueY),
+	}
+	drawer.DrawString(hoursValue)
+
+	// Draw "Hours wasted" label
+	drawer.Dot = fixed.P(HoursLabelX, adjustedLabelY)
+	drawer.DrawString("Hours wasted")
+
+	return nil
+}
+
+// drawValueSection draws the account value section
+func drawValueSection(dc *advancegg.Context, value int) error {
+	img := dc.Image().(*image.RGBA)
+
+	face, err := loadFont(FontSizeStats)
+	if err != nil {
+		return err
+	}
+
+	// Adjust Y positions
+	adjustedLabelY := ValueLabelY + 26
+	adjustedAmountY := ValueAmountY + 26
+
+	drawer := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(color.White),
+		Face: face,
+	}
+
+	// Draw "Value" label
+	fmt.Printf("[DEBUG] Value label 'Value' at position (%d, %d -> %d)\n", ValueLabelX, ValueLabelY, adjustedLabelY)
+	drawer.Dot = fixed.P(ValueLabelX, adjustedLabelY)
+	drawer.DrawString("Value")
+
+	// Draw value amount with rupee symbol
+	valueText := fmt.Sprintf("\u20B9 %d", value) // Unicode rupee symbol
+	fmt.Printf("[DEBUG] Value amount '%s' (raw value: %d) at position (%d, %d -> %d)\n", valueText, value, ValueAmountX, ValueAmountY, adjustedAmountY)
+	drawer.Dot = fixed.P(ValueAmountX, adjustedAmountY)
+	drawer.DrawString(valueText)
+
+	return nil
+}
+
+// loadFont loads and creates a font face with the specified size
+func loadFont(size float64) (font.Face, error) {
+	fontBytes, err := os.ReadFile(FontPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading font: %w", err)
+	}
+
+	parsedFont, err := opentype.Parse(fontBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing font: %w", err)
+	}
+
+	face, err := opentype.NewFace(parsedFont, &opentype.FaceOptions{
+		Size:    size,
 		DPI:     72,
 		Hinting: font.HintingFull,
 	})
 	if err != nil {
-		return fmt.Errorf("creating regular face: %w", err)
+		return nil, fmt.Errorf("creating font face: %w", err)
 	}
 
-	statsY := textY + 55
-	statsText := fmt.Sprintf("Status: %s  |  Level: %d  |  Games: %d",
-		opts.Status, opts.Level, opts.GameCount)
-
-	drawer.Face = regularFace
-	drawer.Dot = fixed.P(textX, statsY)
-	drawer.Src = image.NewUniform(color.White) // Fully opaque white like username
-	drawer.DrawString(statsText)
-
-	return nil
+	return face, nil
 }

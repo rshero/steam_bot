@@ -230,15 +230,27 @@ type SteamPlayerLevelResponse struct {
 
 type SteamOwnedGamesResponse struct {
 	Response struct {
-		GameCount int `json:"game_count"`
+		GameCount int             `json:"game_count"`
+		Games     []SteamOwnedGame `json:"games"`
 	} `json:"response"`
 }
 
+type SteamOwnedGame struct {
+	AppID           int    `json:"appid"`
+	Name            string `json:"name"`
+	PlaytimeForever int    `json:"playtime_forever"` // in minutes
+	Playtime2Weeks  int    `json:"playtime_2weeks"`  // in minutes
+	ImgIconURL      string `json:"img_icon_url"`
+}
+
 type SteamUserInfo struct {
-	SteamID   string
-	Summary   SteamPlayerSummary
-	Level     int
-	GameCount int
+	SteamID      string
+	Summary      SteamPlayerSummary
+	Level        int
+	GameCount    int
+	GamesPlayed  int     // Games with playtime > 0
+	TotalHours   float64 // Total hours across all games
+	AccountValue int     // Estimated account value in local currency
 }
 
 // ----- Steam Profile Items Types -----
@@ -417,15 +429,37 @@ func GetSteamLevel(apiKey, steamID string) (int, error) {
 
 // GetSteamOwnedGamesCount fetches the number of games owned by a player
 func GetSteamOwnedGamesCount(apiKey, steamID string) (int, error) {
-	apiURL := fmt.Sprintf("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=%s&steamid=%s&include_played_free_games=true",
+	response, err := GetSteamOwnedGames(apiKey, steamID)
+	if err != nil {
+		return 0, err
+	}
+	return response.Response.GameCount, nil
+}
+
+// GetSteamOwnedGames fetches detailed owned games data including playtime
+func GetSteamOwnedGames(apiKey, steamID string) (*SteamOwnedGamesResponse, error) {
+	apiURL := fmt.Sprintf("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=%s&steamid=%s&include_played_free_games=true&include_appinfo=true",
 		apiKey, steamID)
 
 	var response SteamOwnedGamesResponse
 	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
-		return 0, fmt.Errorf("fetching owned games: %w", err)
+		return nil, fmt.Errorf("fetching owned games: %w", err)
 	}
 
-	return response.Response.GameCount, nil
+	return &response, nil
+}
+
+// CalculateGameStats calculates games played and total hours from owned games
+func CalculateGameStats(games []SteamOwnedGame) (gamesPlayed int, totalHours float64) {
+	totalMinutes := 0
+	for _, game := range games {
+		if game.PlaytimeForever > 0 {
+			gamesPlayed++
+			totalMinutes += game.PlaytimeForever
+		}
+	}
+	totalHours = float64(totalMinutes) / 60.0
+	return
 }
 
 // GetSteamUserInfo fetches complete user info by username (vanity URL)
@@ -441,13 +475,29 @@ func GetSteamUserInfo(apiKey, username string) (*SteamUserInfo, error) {
 	}
 
 	level, _ := GetSteamLevel(apiKey, steamID)
-	gameCount, _ := GetSteamOwnedGamesCount(apiKey, steamID)
+
+	// Fetch detailed games data
+	gamesResponse, err := GetSteamOwnedGames(apiKey, steamID)
+	gameCount := 0
+	gamesPlayed := 0
+	totalHours := 0.0
+
+	if err == nil {
+		gameCount = gamesResponse.Response.GameCount
+		gamesPlayed, totalHours = CalculateGameStats(gamesResponse.Response.Games)
+	}
+
+	// Rough estimate: ~500 INR per game on average (can be adjusted)
+	accountValue := gameCount * 500
 
 	return &SteamUserInfo{
-		SteamID:   steamID,
-		Summary:   *summary,
-		Level:     level,
-		GameCount: gameCount,
+		SteamID:      steamID,
+		Summary:      *summary,
+		Level:        level,
+		GameCount:    gameCount,
+		GamesPlayed:  gamesPlayed,
+		TotalHours:   totalHours,
+		AccountValue: accountValue,
 	}, nil
 }
 

@@ -37,7 +37,7 @@ const (
 	// Stats bar settings from Figma (985×170 at y=384)
 	StatsBarHeight = 170
 	StatsBarY      = 384 // Figma: 100 + 284
-	StatsBarBlur   = 46.8
+	StatsBarBlur   = 10  // Optimized blur radius (reduced from 47 for performance)
 	StatsBarAlpha  = 220 // 60% opacity = 153/255
 
 	// Font paths (BubblegumSans from Figma)
@@ -74,6 +74,12 @@ const (
 // Default background color (Steam's dark blue)
 var DefaultBgColor = color.RGBA{R: 27, G: 40, B: 56, A: 255}
 
+// Font cache to avoid reloading font files
+var (
+	fontCache = make(map[float64]font.Face)
+	fontMutex = make(chan struct{}, 1)
+)
+
 // ProfileCardOptions contains all data needed to generate a profile card
 type ProfileCardOptions struct {
 	BackgroundURL string
@@ -94,58 +100,51 @@ func GenerateProfileCard(opts ProfileCardOptions) ([]byte, error) {
 	// Create the drawing context with new Figma dimensions
 	dc := advancegg.NewContext(CardWidth, CardHeight)
 
-	fmt.Printf("\n[DEBUG] ===== Profile Card Generation =====\n")
-	fmt.Printf("[DEBUG] Card dimensions: %dx%d\n", CardWidth, CardHeight)
-	fmt.Printf("[DEBUG] Stats bar: Y=%d, Height=%d (from %d to %d)\n", StatsBarY, StatsBarHeight, StatsBarY, StatsBarY+StatsBarHeight)
-	fmt.Printf("[DEBUG] Avatar: pos=(%d,%d), size=%d\n", AvatarX, AvatarY, AvatarSize)
-
 	// 1. Draw background
 	if err := drawBackground(dc, opts.BackgroundURL); err != nil {
-		// Use default color if background fails
 		dc.SetColor(DefaultBgColor)
 		dc.Clear()
 	}
 
-	// 2. Draw semi-transparent blurred stats bar
-	drawStatsBar(dc)
+	// 2. Draw semi-transparent stats bar with optimized blur
+	drawStatsBarOptimized(dc)
 
 	// 3. Draw avatar with drop shadow and frame
 	if err := drawAvatar(dc, opts.AvatarURL, opts.FrameURL, opts.Status); err != nil {
 		// Continue without avatar if it fails
-		fmt.Printf("Failed to draw avatar: %v\n", err)
 	}
 
 	// 4. Draw username below avatar
 	if err := drawUsername(dc, opts.Username); err != nil {
-		fmt.Printf("Failed to draw username: %v\n", err)
+		// Continue without username if it fails
 	}
 
 	// 5. Draw stats (Level | Country | Games)
 	if err := drawLevelStats(dc, opts); err != nil {
-		fmt.Printf("Failed to draw level stats: %v\n", err)
+		// Continue without stats if it fails
 	}
 
-	// 6. Draw progress bar
-	drawProgressBar(dc, opts.GamesPlayed, opts.GameCount)
+	// 6. Draw progress bar with fixed rounded corners
+	drawProgressBarFixed(dc, opts.GamesPlayed, opts.GameCount)
 
 	// 7. Draw "X out of Y games played" text
 	if err := drawGamesPlayedText(dc, opts.GamesPlayed, opts.GameCount); err != nil {
-		fmt.Printf("Failed to draw games played text: %v\n", err)
+		// Continue without text if it fails
 	}
 
 	// 8. Draw hours section
 	if err := drawHoursSection(dc, opts.TotalHours); err != nil {
-		fmt.Printf("Failed to draw hours section: %v\n", err)
+		// Continue without hours if it fails
 	}
 
 	// 9. Draw value section
 	if err := drawValueSection(dc, opts.AccountValue); err != nil {
-		fmt.Printf("Failed to draw value section: %v\n", err)
+		// Continue without value if it fails
 	}
 
-	// 10. Encode to JPEG with quality 85
+	// 10. Encode to JPEG with maximum quality
 	var buf bytes.Buffer
-	if err := dc.EncodeJPG(&buf, &jpeg.Options{Quality: 85}); err != nil {
+	if err := dc.EncodeJPG(&buf, &jpeg.Options{Quality: 100}); err != nil {
 		return nil, fmt.Errorf("encoding JPEG: %w", err)
 	}
 
@@ -191,13 +190,20 @@ func drawBackground(dc *advancegg.Context, url string) error {
 	return nil
 }
 
-// drawStatsBar draws a semi-transparent blurred stats bar
-// Note: True blur effect requires image processing; we'll use high opacity for now
-func drawStatsBar(dc *advancegg.Context) {
-	// Draw the stats bar with color #4E505A at 30% opacity
-	dc.SetRGBA255(78, 80, 90, StatsBarAlpha)
-	dc.DrawRectangle(0, float64(StatsBarY), CardWidth, StatsBarHeight)
-	dc.Fill()
+// drawStatsBarOptimized draws a semi-transparent blurred stats bar
+func drawStatsBarOptimized(dc *advancegg.Context) {
+	// Create a separate context for the stats bar (smaller image = faster blur)
+	statsDC := advancegg.NewContext(CardWidth, StatsBarHeight)
+	statsDC.SetRGBA255(78, 80, 90, StatsBarAlpha)
+	statsDC.DrawRectangle(0, 0, CardWidth, StatsBarHeight)
+	statsDC.Fill()
+
+	// Apply blur (reduced radius for performance)
+	statsImg := statsDC.Image()
+	blurredImg := advancegg.Blur(StatsBarBlur)(statsImg)
+
+	// Draw the blurred stats bar
+	dc.DrawImage(blurredImg, 0, StatsBarY)
 }
 
 // drawAvatar downloads and draws the avatar with drop shadow, frame, and status indicator
@@ -206,7 +212,6 @@ func drawAvatar(dc *advancegg.Context, avatarURL, frameURL, status string) error
 		return fmt.Errorf("no avatar URL")
 	}
 
-	// Download avatar
 	avatarBytes, err := utils.HttpGetBytes(avatarURL)
 	if err != nil {
 		return fmt.Errorf("downloading avatar: %w", err)
@@ -217,10 +222,6 @@ func drawAvatar(dc *advancegg.Context, avatarURL, frameURL, status string) error
 		return fmt.Errorf("decoding avatar: %w", err)
 	}
 
-	// TODO: Add drop shadow effect (requires image processing library)
-	// For now, draw avatar directly
-
-	// Draw avatar scaled to AvatarSize (184×184)
 	avatarBounds := avatarImg.Bounds()
 	avatarScale := float64(AvatarSize) / float64(avatarBounds.Dx())
 
@@ -230,11 +231,9 @@ func drawAvatar(dc *advancegg.Context, avatarURL, frameURL, status string) error
 	dc.DrawImage(avatarImg, 0, 0)
 	dc.Pop()
 
-	// Draw frame if available
 	if frameURL != "" {
 		frameBytes, err := utils.HttpGetBytes(frameURL)
 		if err != nil {
-			// Frame download failed, continue without it
 			return nil
 		}
 
@@ -243,7 +242,6 @@ func drawAvatar(dc *advancegg.Context, avatarURL, frameURL, status string) error
 			return nil
 		}
 
-		// Frame should be slightly larger than avatar
 		frameBounds := frameImg.Bounds()
 		frameScale := float64(AvatarSize+30) / float64(frameBounds.Dx())
 
@@ -254,7 +252,6 @@ func drawAvatar(dc *advancegg.Context, avatarURL, frameURL, status string) error
 		dc.Pop()
 	}
 
-	// Draw status indicator (circle on right edge of avatar)
 	drawStatusIndicator(dc, status)
 
 	return nil
@@ -262,27 +259,24 @@ func drawAvatar(dc *advancegg.Context, avatarURL, frameURL, status string) error
 
 // drawStatusIndicator draws a status indicator circle
 func drawStatusIndicator(dc *advancegg.Context, status string) {
-	// Determine color based on status
 	var statusColor color.RGBA
 	switch status {
 	case "Online":
-		statusColor = color.RGBA{R: 87, G: 186, B: 115, A: 255} // Green
+		statusColor = color.RGBA{R: 87, G: 186, B: 115, A: 255}
 	case "Away":
-		statusColor = color.RGBA{R: 237, G: 193, B: 75, A: 255} // Yellow
+		statusColor = color.RGBA{R: 237, G: 193, B: 75, A: 255}
 	case "Busy":
-		statusColor = color.RGBA{R: 186, G: 87, B: 87, A: 255} // Red
+		statusColor = color.RGBA{R: 186, G: 87, B: 87, A: 255}
 	default:
-		statusColor = color.RGBA{R: 140, G: 140, B: 140, A: 255} // Gray for offline
+		statusColor = color.RGBA{R: 140, G: 140, B: 140, A: 255}
 	}
 
-	// Draw stroke (border)
-	dc.SetRGBA255(182, 182, 182, 214) // #B6B6B6 at 84% opacity
+	dc.SetRGBA255(182, 182, 182, 214)
 	dc.DrawCircle(float64(StatusIndicatorX+StatusIndicatorSize/2),
 		float64(StatusIndicatorY+StatusIndicatorSize/2),
-		float64(StatusIndicatorSize)/2+2.5) // +2.5 for stroke weight 5
+		float64(StatusIndicatorSize)/2+2.5)
 	dc.Fill()
 
-	// Draw inner circle with status color
 	dc.SetColor(statusColor)
 	dc.DrawCircle(float64(StatusIndicatorX+StatusIndicatorSize/2),
 		float64(StatusIndicatorY+StatusIndicatorSize/2),
@@ -298,8 +292,6 @@ func drawUsername(dc *advancegg.Context, username string) error {
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("[DEBUG] Username '%s' at position (%d, %d)\n", username, UsernameX, UsernameY)
 
 	drawer := &font.Drawer{
 		Dst:  img,
@@ -321,14 +313,10 @@ func drawLevelStats(dc *advancegg.Context, opts ProfileCardOptions) error {
 		return err
 	}
 
-	// Format: "Level 8 | USA | 19 Games"
 	statsText := fmt.Sprintf("Level %d | %s | %d Games",
 		opts.Level, opts.CountryCode, opts.GameCount)
 
-	// Adjust Y position - Figma coord appears to be top of text box, not baseline
-	adjustedY := LevelTextY + 26 // Add ascent for 32pt font
-
-	fmt.Printf("[DEBUG] Level stats '%s' at position (%d, %d -> %d)\n", statsText, LevelTextX, LevelTextY, adjustedY)
+	adjustedY := LevelTextY + 26
 
 	drawer := &font.Drawer{
 		Dst:  img,
@@ -341,37 +329,36 @@ func drawLevelStats(dc *advancegg.Context, opts ProfileCardOptions) error {
 	return nil
 }
 
-// drawProgressBar draws the games progress bar with rounded ends
-func drawProgressBar(dc *advancegg.Context, gamesPlayed, totalGames int) {
+// drawProgressBarFixed draws the games progress bar with proper rounded corners using clipping
+func drawProgressBarFixed(dc *advancegg.Context, gamesPlayed, totalGames int) {
 	if totalGames == 0 {
 		return
 	}
 
-	// Calculate progress ratio
 	progress := float64(gamesPlayed) / float64(totalGames)
 	filledWidth := float64(ProgressBarWidth) * progress
+	radius := float64(ProgressBarHeight) / 2
 
-	barCenterY := float64(ProgressBarY) + float64(ProgressBarHeight)/2
-
-	fmt.Printf("[DEBUG] Progress bar at (%d, %d), width=%d, height=%d, filled=%.1f%%\n",
-		ProgressBarX, ProgressBarY, ProgressBarWidth, ProgressBarHeight, progress*100)
-
-	// Draw background bar (gray, full width) with rounded ends
+	// Draw background bar (gray, full width) with rounded ends (capsule shape)
 	dc.SetRGBA255(210, 210, 210, 255)
-	dc.SetLineWidth(float64(ProgressBarHeight))
-	dc.SetLineCap(1) // Round cap
-	dc.DrawLine(float64(ProgressBarX), barCenterY,
-		float64(ProgressBarX+ProgressBarWidth), barCenterY)
-	dc.Stroke()
+	dc.DrawRoundedRectangle(float64(ProgressBarX), float64(ProgressBarY),
+		float64(ProgressBarWidth), float64(ProgressBarHeight), radius)
+	dc.Fill()
 
-	// Draw filled portion (black) with rounded ends
+	// Draw filled portion with proper rounded corners using clipping
 	if filledWidth > 0 {
-		dc.SetRGBA255(45, 49, 51, 255)
-		dc.SetLineWidth(float64(ProgressBarHeight))
-		dc.SetLineCap(1) // Round cap
-		dc.DrawLine(float64(ProgressBarX), barCenterY,
-			float64(ProgressBarX)+filledWidth, barCenterY)
-		dc.Stroke()
+		// Save state and clip to the full progress bar shape
+		dc.Push()
+		dc.DrawRoundedRectangle(float64(ProgressBarX), float64(ProgressBarY),
+			float64(ProgressBarWidth), float64(ProgressBarHeight), radius)
+		dc.Clip()
+
+		// Draw the filled portion (it will be clipped to match the background's rounded corners)
+		dc.SetRGBA255(129, 129, 129, 255)
+		dc.DrawRectangle(float64(ProgressBarX), float64(ProgressBarY), filledWidth, float64(ProgressBarHeight))
+		dc.Fill()
+
+		dc.Pop()
 	}
 }
 
@@ -386,10 +373,7 @@ func drawGamesPlayedText(dc *advancegg.Context, gamesPlayed, totalGames int) err
 
 	text := fmt.Sprintf("%d out of %d games played", gamesPlayed, totalGames)
 
-	// Adjust Y position for 20pt font
-	adjustedY := GamesPlayedY + 16 // Add ascent
-
-	fmt.Printf("[DEBUG] Games played '%s' at position (%d, %d -> %d)\n", text, GamesPlayedX, GamesPlayedY, adjustedY)
+	adjustedY := GamesPlayedY + 16
 
 	drawer := &font.Drawer{
 		Dst:  img,
@@ -406,7 +390,6 @@ func drawGamesPlayedText(dc *advancegg.Context, gamesPlayed, totalGames int) err
 func drawHoursSection(dc *advancegg.Context, hours float64) error {
 	img := dc.Image().(*image.RGBA)
 
-	// Draw hours value (large)
 	valueFace, err := loadFont(FontSizeStats)
 	if err != nil {
 		return err
@@ -414,12 +397,8 @@ func drawHoursSection(dc *advancegg.Context, hours float64) error {
 
 	hoursValue := fmt.Sprintf("%.1f", hours)
 
-	// Adjust Y positions
 	adjustedValueY := HoursValueY + 26
 	adjustedLabelY := HoursLabelY + 26
-
-	fmt.Printf("[DEBUG] Hours value '%s' at position (%d, %d -> %d)\n", hoursValue, HoursValueX, HoursValueY, adjustedValueY)
-	fmt.Printf("[DEBUG] Hours label 'Hours wasted' at position (%d, %d -> %d)\n", HoursLabelX, HoursLabelY, adjustedLabelY)
 
 	drawer := &font.Drawer{
 		Dst:  img,
@@ -429,7 +408,6 @@ func drawHoursSection(dc *advancegg.Context, hours float64) error {
 	}
 	drawer.DrawString(hoursValue)
 
-	// Draw "Hours wasted" label
 	drawer.Dot = fixed.P(HoursLabelX, adjustedLabelY)
 	drawer.DrawString("Hours wasted")
 
@@ -445,7 +423,6 @@ func drawValueSection(dc *advancegg.Context, value int) error {
 		return err
 	}
 
-	// Adjust Y positions
 	adjustedLabelY := ValueLabelY + 26
 	adjustedAmountY := ValueAmountY + 26
 
@@ -455,22 +432,26 @@ func drawValueSection(dc *advancegg.Context, value int) error {
 		Face: face,
 	}
 
-	// Draw "Value" label
-	fmt.Printf("[DEBUG] Value label 'Value' at position (%d, %d -> %d)\n", ValueLabelX, ValueLabelY, adjustedLabelY)
 	drawer.Dot = fixed.P(ValueLabelX, adjustedLabelY)
 	drawer.DrawString("Value")
 
-	// Draw value amount with rupee symbol
-	valueText := fmt.Sprintf("\u20B9 %d", value) // Unicode rupee symbol
-	fmt.Printf("[DEBUG] Value amount '%s' (raw value: %d) at position (%d, %d -> %d)\n", valueText, value, ValueAmountX, ValueAmountY, adjustedAmountY)
+	valueText := fmt.Sprintf("\u20B9 %d", value)
 	drawer.Dot = fixed.P(ValueAmountX, adjustedAmountY)
 	drawer.DrawString(valueText)
 
 	return nil
 }
 
-// loadFont loads and creates a font face with the specified size
+// loadFont loads and creates a font face with the specified size (with caching)
 func loadFont(size float64) (font.Face, error) {
+	fontMutex <- struct{}{}
+	defer func() { <-fontMutex }()
+
+	// Check cache first
+	if face, ok := fontCache[size]; ok {
+		return face, nil
+	}
+
 	fontBytes, err := os.ReadFile(FontPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading font: %w", err)
@@ -489,6 +470,9 @@ func loadFont(size float64) (font.Face, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating font face: %w", err)
 	}
+
+	// Cache the face
+	fontCache[size] = face
 
 	return face, nil
 }

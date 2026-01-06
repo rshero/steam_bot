@@ -58,7 +58,7 @@ const (
 	GamesPlayedY = 480 // Figma: 196 + 284
 	HoursValueX  = 680 // Figma: 133 + 547
 	HoursValueY  = 414 // Figma: 130 + 284
-	HoursLabelX  = 625 // Figma: 64 + 547
+	HoursLabelX  = 629 // Figma: 64 + 547
 	HoursLabelY  = 451 // Figma: 167 + 284
 	ValueLabelX  = 888 // Figma: 305 + 547
 	ValueLabelY  = 406 // Figma: 122 + 284

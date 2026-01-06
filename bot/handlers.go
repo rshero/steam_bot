@@ -815,7 +815,7 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 			InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 				{
 					{Text: "View Profile", Url: updatedInfo.Summary.ProfileURL},
-					{Text: "🔄 Refresh", CallbackData: fmt.Sprintf("mysteam_refresh:%s", updatedInfo.SteamID)},
+					{Text: "Refresh", CallbackData: fmt.Sprintf("mysteam_refresh:%s", updatedInfo.SteamID)},
 				},
 			},
 		}

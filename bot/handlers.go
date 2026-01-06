@@ -662,10 +662,10 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 	log.Printf("[DEBUG] Generated card size: %d bytes", len(cardBytes))
 
 	// Upload to imgbb first (fast and reliable), fallback to catbox
-	imageURL, err := utils.UploadImageToImgBB(cardBytes, "profile.jpg")
+	imageURL, err := utils.UploadImageToImgBB(cardBytes, "profile.png")
 	if err != nil {
 		log.Printf("[DEBUG] imgbb upload failed, trying catbox: %v", err)
-		imageURL, err = utils.UploadImage(cardBytes, "profile.jpg")
+		imageURL, err = utils.UploadImage(cardBytes, "profile.png")
 		if err != nil {
 			log.Printf("Error uploading image: %v", err)
 			return sendTextProfileFallback(b, ctx, userInfo)

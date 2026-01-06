@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/jpeg"
 	"os"
 	"steam_bot/utils"
 
@@ -142,10 +141,10 @@ func GenerateProfileCard(opts ProfileCardOptions) ([]byte, error) {
 		// Continue without value if it fails
 	}
 
-	// 10. Encode to JPEG with maximum quality
+	// 10. Encode to PNG for lossless quality
 	var buf bytes.Buffer
-	if err := dc.EncodeJPG(&buf, &jpeg.Options{Quality: 100}); err != nil {
-		return nil, fmt.Errorf("encoding JPEG: %w", err)
+	if err := dc.EncodePNG(&buf); err != nil {
+		return nil, fmt.Errorf("encoding PNG: %w", err)
 	}
 
 	return buf.Bytes(), nil

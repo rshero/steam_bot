@@ -1,6 +1,7 @@
 package steam
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"steam_bot/utils"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rshero/hltb"
 )
@@ -20,6 +22,10 @@ var (
 	hltbClientErr  error
 )
 
+// ----- Database Package Variable -----
+
+var db *Database
+
 func getHltbClient() (*hltb.Client, error) {
 	hltbClientOnce.Do(func() {
 		hltbClient, hltbClientErr = hltb.NewClientWithInit()
@@ -28,6 +34,16 @@ func getHltbClient() (*hltb.Client, error) {
 		}
 	})
 	return hltbClient, hltbClientErr
+}
+
+// ----- Database Access -----
+
+func SetDatabase(database *Database) {
+	db = database
+}
+
+func GetDatabase() *Database {
+	return db
 }
 
 // ----- API Response Types -----
@@ -77,6 +93,7 @@ type ReleaseDate struct {
 
 type PriceOverview struct {
 	FinalFormatted string `json:"final_formatted"`
+	Final          int    `json:"final"`
 }
 
 type PcRequirements struct {
@@ -143,6 +160,32 @@ func (d *SteamAppDetails) FormattedPrice() string {
 func (d *SteamAppDetails) GetPcRequirements() PcRequirements {
 	var reqs PcRequirements
 	_ = json.Unmarshal(d.PcRequirements, &reqs)
+	return reqs
+}
+
+// GetRequirementsWithCache fetches requirements with database caching
+func GetRequirementsWithCache(ctx context.Context, appID string, details *SteamAppDetails) PcRequirements {
+	if db != nil {
+		if cached, err := db.GetRequirements(ctx, appID); err == nil && cached != nil {
+			log.Printf("[DB] Requirements cache hit for appID %s", appID)
+			return PcRequirements{
+				Minimum:     cached.Minimum,
+				Recommended: cached.Recommended,
+			}
+		}
+	}
+
+	reqs := details.GetPcRequirements()
+
+	if db != nil {
+		err := db.SetRequirements(ctx, appID, reqs.Minimum, reqs.Recommended, 30*24*time.Hour)
+		if err != nil {
+			log.Printf("[DB] Error caching requirements for appID %s: %v", appID, err)
+		} else {
+			log.Printf("[DB] Cached requirements for appID %s", appID)
+		}
+	}
+
 	return reqs
 }
 
@@ -230,14 +273,54 @@ type SteamPlayerLevelResponse struct {
 
 type SteamOwnedGamesResponse struct {
 	Response struct {
-		GameCount int `json:"game_count"`
+		GameCount int              `json:"game_count"`
+		Games     []SteamOwnedGame `json:"games"`
 	} `json:"response"`
 }
 
+type SteamOwnedGame struct {
+	AppID           int    `json:"appid"`
+	Name            string `json:"name"`
+	PlaytimeForever int    `json:"playtime_forever"` // in minutes
+	Playtime2Weeks  int    `json:"playtime_2weeks"`  // in minutes
+	ImgIconURL      string `json:"img_icon_url"`
+}
+
 type SteamUserInfo struct {
-	Summary   SteamPlayerSummary
-	Level     int
-	GameCount int
+	SteamID      string
+	Summary      SteamPlayerSummary
+	Level        int
+	GameCount    int
+	GamesPlayed  int     // Games with playtime > 0
+	TotalHours   float64 // Total hours across all games
+	AccountValue string  // Estimated account value with currency symbol or "-" for calculating
+}
+
+// ----- Steam Profile Items Types -----
+
+// SteamCDN is the base URL for Steam community assets
+const SteamCDN = "https://shared.akamai.steamstatic.com/community_assets/images/"
+
+type ProfileItemsResponse struct {
+	Response ProfileItems `json:"response"`
+}
+
+type ProfileItems struct {
+	ProfileBackground     ProfileItem `json:"profile_background"`
+	MiniProfileBackground ProfileItem `json:"mini_profile_background"`
+	AvatarFrame           ProfileItem `json:"avatar_frame"`
+	AnimatedAvatar        ProfileItem `json:"animated_avatar"`
+}
+
+type ProfileItem struct {
+	CommunityItemID string `json:"communityitemid"`
+	ImageLarge      string `json:"image_large"`
+	ImageSmall      string `json:"image_small"`
+	Name            string `json:"name"`
+	ItemTitle       string `json:"item_title"`
+	AppID           int    `json:"appid"`
+	MovieWebm       string `json:"movie_webm"`
+	MovieMp4        string `json:"movie_mp4"`
 }
 
 // ----- API Functions -----
@@ -289,8 +372,100 @@ func GetSteamAppInfo(appID string) (AppInfo, error) {
 	return details.ToAppInfo(), nil
 }
 
-// GetSteamAppReviews fetches review summary for an app
-func GetSteamAppReviews(appID string) (*SteamReviewSummary, error) {
+// BatchPriceResponse represents the response for multiple app price queries
+type BatchPriceResponse struct {
+	Success bool            `json:"success"`
+	Data    json.RawMessage `json:"data"`
+}
+
+// FetchBatchPriceOverview fetches prices for multiple apps in a single request
+// Returns: priceOverviews map, total price in cents, appIds without price data, error
+func FetchBatchPriceOverview(appIds []int, countryCode string) (map[string]PriceOverview, int, []int, error) {
+	if len(appIds) == 0 {
+		return map[string]PriceOverview{}, 0, nil, nil
+	}
+
+	// Convert app IDs to strings and join with commas
+	appIdStrs := make([]string, len(appIds))
+	for i, id := range appIds {
+		appIdStrs[i] = fmt.Sprintf("%d", id)
+	}
+	appIdsParam := strings.Join(appIdStrs, ",")
+
+	// Use 'in' as default country code if not provided
+	if countryCode == "" {
+		countryCode = "in"
+	}
+
+	apiURL := fmt.Sprintf("https://store.steampowered.com/api/appdetails?appids=%s&cc=%s&filters=price_overview",
+		appIdsParam, countryCode)
+
+	var response map[string]BatchPriceResponse
+	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
+		return nil, 0, nil, fmt.Errorf("fetching batch price overview: %w", err)
+	}
+
+	priceOverviews := make(map[string]PriceOverview)
+	foundAppIds := make(map[int]bool)
+	totalPrice := 0
+
+	for appID, appData := range response {
+		if !appData.Success || len(appData.Data) == 0 {
+			continue
+		}
+
+		// Try to parse the data field - it might be an object or an array
+		var dataObj struct {
+			PriceOverview *PriceOverview `json:"price_overview"`
+		}
+
+		if err := json.Unmarshal(appData.Data, &dataObj); err != nil {
+			// If unmarshal fails, data might be an array or invalid - skip this app
+			continue
+		}
+
+		if dataObj.PriceOverview != nil && dataObj.PriceOverview.Final > 0 {
+			// Skip if the formatted price is "Free" (temporary promotions or incorrect data)
+			if dataObj.PriceOverview.FinalFormatted == "Free" {
+				continue
+			}
+			priceOverviews[appID] = *dataObj.PriceOverview
+			totalPrice += dataObj.PriceOverview.Final
+
+			// Mark this app ID as found (convert string back to int)
+			if id, err := fmt.Sscanf(appID, "%d", new(int)); err == nil && id == 1 {
+				var intID int
+				fmt.Sscanf(appID, "%d", &intID)
+				foundAppIds[intID] = true
+			}
+		}
+	}
+
+	// Find missing app IDs
+	missingAppIds := []int{}
+	for _, appID := range appIds {
+		if !foundAppIds[appID] {
+			missingAppIds = append(missingAppIds, appID)
+		}
+	}
+
+	return priceOverviews, totalPrice, missingAppIds, nil
+}
+
+// GetSteamAppReviews fetches review summary for an app with caching
+func GetSteamAppReviews(ctx context.Context, appID string) (*SteamReviewSummary, error) {
+	if db != nil {
+		if cached, err := db.GetReviews(ctx, appID); err == nil && cached != nil {
+			log.Printf("[DB] Reviews cache hit for appID %s", appID)
+			return &SteamReviewSummary{
+				ReviewScoreDesc: cached.ReviewScoreDesc,
+				TotalPositive:   cached.TotalPositive,
+				TotalNegative:   cached.TotalNegative,
+				TotalReviews:    cached.TotalReviews,
+			}, nil
+		}
+	}
+
 	apiURL := fmt.Sprintf("https://store.steampowered.com/appreviews/%s?json=1&num_per_page=0", appID)
 
 	var response SteamReviewSummaryResponse
@@ -300,6 +475,16 @@ func GetSteamAppReviews(appID string) (*SteamReviewSummary, error) {
 
 	if response.Success != 1 {
 		return nil, fmt.Errorf("reviews unavailable for appID %s", appID)
+	}
+
+	if db != nil {
+		reviews := &response.QuerySummary
+		err := db.SetReviews(ctx, appID, reviews, 6*time.Hour)
+		if err != nil {
+			log.Printf("[DB] Error caching reviews for appID %s: %v", appID, err)
+		} else {
+			log.Printf("[DB] Cached reviews for appID %s", appID)
+		}
 	}
 
 	return &response.QuerySummary, nil
@@ -323,8 +508,20 @@ func SearchSteam(query string) ([]SteamSearchItem, error) {
 	return result.Items, nil
 }
 
-// GetHltbData fetches How Long To Beat data for a game
-func GetHltbData(searchTerm string) (*hltb.Game, error) {
+// GetHltbData fetches How Long To Beat data for a game with caching
+func GetHltbData(ctx context.Context, appID string, searchTerm string) (*hltb.Game, error) {
+	if db != nil {
+		if cached, err := db.GetHLTB(ctx, appID); err == nil && cached != nil {
+			log.Printf("[DB] HLTB cache hit for appID %s", appID)
+			return &hltb.Game{
+				MainStory:     float32(cached.MainStory),
+				MainPlusExtra: float32(cached.MainExtra),
+				Completionist: float32(cached.Completionist),
+				Platforms:     cached.Platforms,
+			}, nil
+		}
+	}
+
 	client, err := getHltbClient()
 	if err != nil {
 		return &hltb.Game{}, fmt.Errorf("hltb client error: %w", err)
@@ -333,6 +530,15 @@ func GetHltbData(searchTerm string) (*hltb.Game, error) {
 	game, err := client.SearchFirstWithDetails(searchTerm)
 	if err != nil {
 		return &hltb.Game{}, fmt.Errorf("hltb search error: %w", err)
+	}
+
+	if db != nil {
+		err = db.SetHLTB(ctx, appID, searchTerm, float64(game.MainStory), float64(game.MainPlusExtra), float64(game.Completionist), game.Platforms, 30*24*time.Hour)
+		if err != nil {
+			log.Printf("[DB] Error caching HLTB data for appID %s: %v", appID, err)
+		} else {
+			log.Printf("[DB] Cached HLTB data for appID %s (game: %s)", appID, searchTerm)
+		}
 	}
 
 	return game, nil
@@ -389,15 +595,37 @@ func GetSteamLevel(apiKey, steamID string) (int, error) {
 
 // GetSteamOwnedGamesCount fetches the number of games owned by a player
 func GetSteamOwnedGamesCount(apiKey, steamID string) (int, error) {
-	apiURL := fmt.Sprintf("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=%s&steamid=%s&include_played_free_games=true",
+	response, err := GetSteamOwnedGames(apiKey, steamID)
+	if err != nil {
+		return 0, err
+	}
+	return response.Response.GameCount, nil
+}
+
+// GetSteamOwnedGames fetches detailed owned games data including playtime
+func GetSteamOwnedGames(apiKey, steamID string) (*SteamOwnedGamesResponse, error) {
+	apiURL := fmt.Sprintf("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=%s&steamid=%s&include_played_free_games=true&include_appinfo=true",
 		apiKey, steamID)
 
 	var response SteamOwnedGamesResponse
 	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
-		return 0, fmt.Errorf("fetching owned games: %w", err)
+		return nil, fmt.Errorf("fetching owned games: %w", err)
 	}
 
-	return response.Response.GameCount, nil
+	return &response, nil
+}
+
+// CalculateGameStats calculates games played and total hours from owned games
+func CalculateGameStats(games []SteamOwnedGame) (gamesPlayed int, totalHours float64) {
+	totalMinutes := 0
+	for _, game := range games {
+		if game.PlaytimeForever > 0 {
+			gamesPlayed++
+			totalMinutes += game.PlaytimeForever
+		}
+	}
+	totalHours = float64(totalMinutes) / 60.0
+	return
 }
 
 // GetSteamUserInfo fetches complete user info by username (vanity URL)
@@ -413,11 +641,272 @@ func GetSteamUserInfo(apiKey, username string) (*SteamUserInfo, error) {
 	}
 
 	level, _ := GetSteamLevel(apiKey, steamID)
-	gameCount, _ := GetSteamOwnedGamesCount(apiKey, steamID)
+
+	// Fetch detailed games data
+	gamesResponse, err := GetSteamOwnedGames(apiKey, steamID)
+	gameCount := 0
+	gamesPlayed := 0
+	totalHours := 0.0
+	accountValue := "-"
+
+	if err == nil {
+		gameCount = gamesResponse.Response.GameCount
+		gamesPlayed, totalHours = CalculateGameStats(gamesResponse.Response.Games)
+
+		// Calculate account value
+		appIds := make([]int, len(gamesResponse.Response.Games))
+		for i, game := range gamesResponse.Response.Games {
+			appIds[i] = game.AppID
+		}
+
+		// Get country code from summary, default to "in"
+		countryCode := summary.CountryCode
+		if countryCode == "" {
+			countryCode = "in"
+		}
+
+		_, totalPrice, _, priceErr := FetchBatchPriceOverview(appIds, countryCode)
+		if priceErr == nil {
+			currencySymbol := GetCurrencySymbol(countryCode)
+			totalPriceFormatted := float64(totalPrice) / 100.0
+			accountValue = fmt.Sprintf("%s%.0f", currencySymbol, totalPriceFormatted)
+		}
+	}
 
 	return &SteamUserInfo{
-		Summary:   *summary,
-		Level:     level,
-		GameCount: gameCount,
+		SteamID:      steamID,
+		Summary:      *summary,
+		Level:        level,
+		GameCount:    gameCount,
+		GamesPlayed:  gamesPlayed,
+		TotalHours:   totalHours,
+		AccountValue: accountValue,
 	}, nil
+}
+
+// GetProfileCardData fetches and caches profile card data for a username
+func GetProfileCardData(ctx context.Context, apiKey, username string) (*SteamUserInfo, *ProfileItems, string, string, error) {
+	if db != nil {
+		if cached, err := db.GetProfileCard(ctx, username); err == nil && cached != nil {
+			log.Printf("[DB] Profile card cache hit for username %s", username)
+
+			info := &SteamUserInfo{
+				SteamID: cached.SteamID,
+				Summary: SteamPlayerSummary{
+					SteamID:      cached.SteamID,
+					PersonaName:  cached.PersonaName,
+					ProfileURL:   fmt.Sprintf("https://steamcommunity.com/profiles/%s", cached.SteamID),
+					Avatar:       cached.Avatar,
+					CountryCode:  cached.CountryCode,
+					PersonaState: personaStateToInt(cached.Status),
+				},
+				Level:        cached.Level,
+				GameCount:    cached.GameCount,
+				GamesPlayed:  cached.GamesPlayed,
+				TotalHours:   cached.TotalHours,
+				AccountValue: cached.AccountValue,
+			}
+
+			items := &ProfileItems{}
+			if cached.Frame != "" {
+				frameURL := strings.TrimPrefix(cached.Frame, SteamCDN)
+				items.AvatarFrame = ProfileItem{ImageLarge: frameURL}
+			}
+			if cached.BackgroundURL != "" {
+				bgURL := strings.TrimPrefix(cached.BackgroundURL, SteamCDN)
+				items.ProfileBackground = ProfileItem{ImageLarge: bgURL}
+			}
+
+			return info, items, cached.Status, cached.ImageURL, nil
+		}
+	}
+
+	steamID, err := ResolveSteamVanityURL(apiKey, username)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+
+	summary, err := GetSteamPlayerSummary(apiKey, steamID)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+
+	level, _ := GetSteamLevel(apiKey, steamID)
+
+	gamesResponse, err := GetSteamOwnedGames(apiKey, steamID)
+	gameCount := 0
+	gamesPlayed := 0
+	totalHours := 0.0
+	accountValue := "-"
+
+	if err == nil {
+		gameCount = gamesResponse.Response.GameCount
+		gamesPlayed, totalHours = CalculateGameStats(gamesResponse.Response.Games)
+
+		// Calculate account value
+		appIds := make([]int, len(gamesResponse.Response.Games))
+		for i, game := range gamesResponse.Response.Games {
+			appIds[i] = game.AppID
+		}
+
+		// Get country code from summary, default to "in"
+		countryCode := summary.CountryCode
+		if countryCode == "" {
+			countryCode = "in"
+		}
+
+		_, totalPrice, _, priceErr := FetchBatchPriceOverview(appIds, countryCode)
+		if priceErr == nil {
+			currencySymbol := GetCurrencySymbol(countryCode)
+			totalPriceFormatted := float64(totalPrice) / 100.0
+			accountValue = fmt.Sprintf("%s%.0f", currencySymbol, totalPriceFormatted)
+		}
+	}
+
+	info := &SteamUserInfo{
+		SteamID:      steamID,
+		Summary:      *summary,
+		Level:        level,
+		GameCount:    gameCount,
+		GamesPlayed:  gamesPlayed,
+		TotalHours:   totalHours,
+		AccountValue: accountValue,
+	}
+
+	profileItems, _ := GetProfileItemsEquipped(apiKey, steamID)
+	status := personaStateToString(summary.PersonaState)
+
+	// Note: imageURL will be empty here and updated later by the caller after image upload
+	return info, profileItems, status, "", nil
+}
+
+// UpdateProfileCardImage updates the cached image URL for a profile card
+func UpdateProfileCardImage(ctx context.Context, username, steamID string, info *SteamUserInfo, profileItems *ProfileItems, status, imageURL string) error {
+	if db == nil {
+		return nil
+	}
+	return db.SetProfileCard(ctx, username, steamID, info, profileItems, status, imageURL, 1*time.Hour)
+}
+
+// GetCurrencySymbol returns the currency symbol based on country code
+func GetCurrencySymbol(countryCode string) string {
+	// Normalize to uppercase for consistent lookup
+	countryCode = strings.ToUpper(countryCode)
+
+	currencyMap := map[string]string{
+		"US": "$",   // United States Dollar
+		"GB": "£",   // British Pound
+		"EU": "€",   // Euro (used for many EU countries)
+		"DE": "€",   // Germany
+		"FR": "€",   // France
+		"IT": "€",   // Italy
+		"ES": "€",   // Spain
+		"NL": "€",   // Netherlands
+		"BE": "€",   // Belgium
+		"AT": "€",   // Austria
+		"PT": "€",   // Portugal
+		"IE": "€",   // Ireland
+		"FI": "€",   // Finland
+		"GR": "€",   // Greece
+		"JP": "¥",   // Japanese Yen
+		"CN": "¥",   // Chinese Yuan
+		"KR": "₩",   // Korean Won
+		"IN": "₹",   // Indian Rupee
+		"RU": "₽",   // Russian Ruble
+		"BR": "R$",  // Brazilian Real
+		"MX": "$",   // Mexican Peso
+		"AU": "A$",  // Australian Dollar
+		"CA": "C$",  // Canadian Dollar
+		"CH": "CHF", // Swiss Franc
+		"SE": "kr",  // Swedish Krona
+		"NO": "kr",  // Norwegian Krone
+		"DK": "kr",  // Danish Krone
+		"PL": "zł",  // Polish Zloty
+		"TR": "₺",   // Turkish Lira
+		"ZA": "R",   // South African Rand
+		"AR": "$",   // Argentine Peso
+		"CL": "$",   // Chilean Peso
+		"CO": "$",   // Colombian Peso
+		"PE": "S/",  // Peruvian Sol
+		"HK": "HK$", // Hong Kong Dollar
+		"TW": "NT$", // Taiwan Dollar
+		"SG": "S$",  // Singapore Dollar
+		"MY": "RM",  // Malaysian Ringgit
+		"TH": "฿",   // Thai Baht
+		"ID": "Rp",  // Indonesian Rupiah
+		"PH": "₱",   // Philippine Peso
+		"VN": "₫",   // Vietnamese Dong
+		"NZ": "NZ$", // New Zealand Dollar
+		"IL": "₪",   // Israeli Shekel
+		"SA": "SR",  // Saudi Riyal
+		"AE": "AED", // UAE Dirham
+		"KW": "KD",  // Kuwaiti Dinar
+		"QA": "QR",  // Qatari Riyal
+		"CZ": "Kč",  // Czech Koruna
+		"HU": "Ft",  // Hungarian Forint
+		"RO": "lei", // Romanian Leu
+		"BG": "лв",  // Bulgarian Lev
+		"HR": "kn",  // Croatian Kuna
+		"UA": "₴",   // Ukrainian Hryvnia
+		"KZ": "₸",   // Kazakhstani Tenge
+	}
+
+	if symbol, ok := currencyMap[countryCode]; ok {
+		return symbol
+	}
+	return "₹" // Default to INR
+}
+
+func personaStateToInt(status string) int {
+	switch status {
+	case "Online":
+		return 1
+	case "Busy":
+		return 2
+	case "Away":
+		return 3
+	case "Snooze":
+		return 4
+	case "Looking to trade":
+		return 5
+	case "Looking to play":
+		return 6
+	default:
+		return 0
+	}
+}
+
+// GetProfileItemsEquipped fetches the equipped profile items (background, frame, etc.) for a user
+func GetProfileItemsEquipped(apiKey, steamID string) (*ProfileItems, error) {
+	apiURL := fmt.Sprintf("https://api.steampowered.com/IPlayerService/GetProfileItemsEquipped/v1/?steamid=%s&key=%s",
+		steamID, apiKey)
+
+	var response ProfileItemsResponse
+	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
+		return nil, fmt.Errorf("fetching profile items: %w", err)
+	}
+
+	return &response.Response, nil
+}
+
+// personaStateToString converts Steam persona state to human readable string
+func personaStateToString(state int) string {
+	switch state {
+	case 0:
+		return "Offline"
+	case 1:
+		return "Online"
+	case 2:
+		return "Busy"
+	case 3:
+		return "Away"
+	case 4:
+		return "Snooze"
+	case 5:
+		return "Looking to trade"
+	case 6:
+		return "Looking to play"
+	default:
+		return "Unknown"
+	}
 }

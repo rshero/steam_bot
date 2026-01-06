@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"time"
 
 	"steam_bot/bot"
 	"steam_bot/config"
+	"steam_bot/steam"
 	"steam_bot/templates"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -16,6 +18,14 @@ import (
 
 func main() {
 	cfg := config.LoadConfig()
+
+	database, err := steam.InitDatabase(context.Background(), "steam.db")
+	if err != nil {
+		log.Fatal("Failed to initialize database:", err)
+	}
+	defer database.Close()
+
+	steam.SetDatabase(database)
 
 	b, updater, dispatcher, err := bot.StartBot(cfg)
 	if err != nil {
@@ -36,7 +46,7 @@ func main() {
 		GetUpdatesOpts: &gotgbot.GetUpdatesOpts{
 			Timeout: 9,
 			RequestOpts: &gotgbot.RequestOpts{
-				Timeout: time.Second * 10,
+				Timeout: time.Second * 600,
 			},
 		},
 	})

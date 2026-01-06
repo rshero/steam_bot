@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -612,24 +613,34 @@ func handleBackCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData) e
 }
 
 func handleMySteamRefreshCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData, cfg *config.Config) error {
-	username := cbData.AppID // AppID field holds the username for mysteam_refresh
+	steamID := cbData.AppID // AppID field holds the steamID for mysteam_refresh
 
-	// log.Printf("[DEBUG] Refresh requested for username: %s", username)
+	log.Printf("Refresh requested for steamID: %s", steamID)
 
-	// Clear the cached entry to force regeneration
+	// Clear the cached entry by steamID to force regeneration
 	if db := steam.GetDatabase(); db != nil {
 		ctx2 := context.Background()
-		err := db.ClearProfileCardCache(ctx2, username)
+		err := db.ClearProfileCardCacheBySteamID(ctx2, steamID)
 		if err != nil {
-			// log.Printf("[DEBUG] Error clearing cache for %s: %v", username, err)
+			log.Printf("Error clearing cache for steamID %s: %v", steamID, err)
 		} else {
-			// log.Printf("[DEBUG] Cleared cache for username %s", username)
+			log.Printf("Cleared cache for steamID %s", steamID)
 		}
 	}
 
 	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Refreshing profile card..."})
 
-	// Now handle it as a regular mysteam callback which will regenerate
+	// Fetch the profile data using steamID directly
+	return handleMySteamRefreshWithSteamID(b, ctx, steamID, cfg)
+}
+
+func handleMySteamRefreshWithSteamID(b *gotgbot.Bot, ctx *ext.Context, steamID string, cfg *config.Config) error {
+	// Just reuse the regular callback handler with the steamID
+	// Steam API accepts steamID64 directly in ResolveSteamVanityURL (it returns as-is if already an ID)
+	cbData := CallbackData{
+		Type:  CallbackMySteam,
+		AppID: steamID,
+	}
 	return handleMySteamCallback(b, ctx, cbData, cfg)
 }
 
@@ -666,8 +677,8 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 
 	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Generating profile card..."})
 
-	// Fetch user info with caching
-	userInfo, profileItems, status, cachedImageURL, err := steam.GetProfileCardData(context.Background(), cfg.SteamAPIKey, username)
+	// Fetch user info with caching - skip account value calculation initially
+	userInfo, profileItems, status, cachedImageURL, err := steam.GetProfileCardData(context.Background(), cfg.SteamAPIKey, username, true)
 	if err != nil {
 		log.Println("Error getting Steam user info:", err)
 		_, _, _ = b.EditMessageCaption(&gotgbot.EditMessageCaptionOpts{
@@ -680,11 +691,17 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 
 	// If we have a cached image URL, use it directly
 	if cachedImageURL != "" {
-		// log.Printf("[DEBUG] Using cached image URL: %s", cachedImageURL)
+		// Check if it's a file_id (prefixed with "file_id:")
+		if strings.HasPrefix(cachedImageURL, "file_id:") {
+			fileID := strings.TrimPrefix(cachedImageURL, "file_id:")
+			log.Printf("Using cached file_id: %s", fileID)
+			return sendProfileCardWithFileID(b, ctx, userInfo, fileID)
+		}
+		log.Printf("Using cached image URL: %s", cachedImageURL)
 		return sendProfileCardWithImage(b, ctx, userInfo, cachedImageURL)
 	}
 
-	// Build image generation options
+	// Build image generation options with "-" for account value initially
 	opts := images.ProfileCardOptions{
 		AvatarURL:    userInfo.Summary.Avatar,
 		Username:     userInfo.Summary.PersonaName,
@@ -693,7 +710,7 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 		GameCount:    userInfo.GameCount,
 		GamesPlayed:  userInfo.GamesPlayed,
 		TotalHours:   userInfo.TotalHours,
-		AccountValue: userInfo.AccountValue,
+		AccountValue: "-", // Initial placeholder
 		Status:       status,
 	}
 
@@ -707,12 +724,7 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 		}
 	}
 
-	// Generate profile card
-	// log.Printf("[DEBUG] Generating profile card for %s", opts.Username)
-	// log.Printf("[DEBUG] BackgroundURL: %s", opts.BackgroundURL)
-	// log.Printf("[DEBUG] AvatarURL: %s", opts.AvatarURL)
-	// log.Printf("[DEBUG] FrameURL: %s", opts.FrameURL)
-
+	// Generate profile card with "-" for account value
 	cardBytes, err := images.GenerateProfileCard(opts)
 	if err != nil {
 		log.Println("Error generating profile card:", err)
@@ -720,29 +732,166 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 		return sendTextProfileFallback(b, ctx, userInfo)
 	}
 
-	// log.Printf("[DEBUG] Generated card size: %d bytes", len(cardBytes))
+	var imageURL string
+	var initialFileID string
 
-	// Upload to imgbb first (fast and reliable), fallback to catbox
-	imageURL, err := utils.UploadImageToImgBB(cardBytes, "profile.png")
-	if err != nil {
-		// log.Printf("[DEBUG] imgbb upload failed, trying catbox: %v", err)
-		imageURL, err = utils.UploadImage(cardBytes, "profile.png")
+	// If DUMP_GROUP is configured, upload to Telegram to get file_id
+	if cfg.DumpGroupID != 0 {
+		sentMsg, err := b.SendPhoto(cfg.DumpGroupID, gotgbot.InputFileByReader("profile.png", bytes.NewReader(cardBytes)), &gotgbot.SendPhotoOpts{
+			Caption: fmt.Sprintf("Profile card for %s (initial)", username),
+		})
 		if err != nil {
-			log.Printf("Error uploading image: %v", err)
-			return sendTextProfileFallback(b, ctx, userInfo)
+			log.Printf("Error uploading to dump group: %v", err)
+		} else {
+			// Get the file_id from the largest photo
+			if len(sentMsg.Photo) > 0 {
+				initialFileID = sentMsg.Photo[len(sentMsg.Photo)-1].FileId
+				log.Printf("Uploaded initial card to dump group, file_id: %s", initialFileID)
+			}
 		}
 	}
-	// log.Printf("[DEBUG] Uploaded image: %s", imageURL)
 
-	// Cache the uploaded image URL
-	err = steam.UpdateProfileCardImage(context.Background(), username, userInfo.SteamID, userInfo, profileItems, status, imageURL)
-	if err != nil {
-		// log.Printf("[DEBUG] Error caching image URL: %v", err)
+	// If we got a file_id, use it; otherwise fall back to external upload
+	if initialFileID == "" {
+		// Upload to imgbb first (fast and reliable), fallback to catbox
+		imageURL, err = utils.UploadImageToImgBB(cardBytes, "profile.png")
+		if err != nil {
+			imageURL, err = utils.UploadImage(cardBytes, "profile.png")
+			if err != nil {
+				log.Printf("Error uploading image: %v", err)
+				return sendTextProfileFallback(b, ctx, userInfo)
+			}
+		}
+
+		// Send the initial profile card immediately with "-" for account value
+		err = sendProfileCardWithImage(b, ctx, userInfo, imageURL)
+		if err != nil {
+			log.Printf("Error sending initial profile card: %v", err)
+			return err
+		}
 	} else {
-		// log.Printf("[DEBUG] Cached image URL for username %s", username)
+		// Send using file_id
+		err = sendProfileCardWithFileID(b, ctx, userInfo, initialFileID)
+		if err != nil {
+			log.Printf("Error sending initial profile card with file_id: %v", err)
+			return err
+		}
 	}
 
-	return sendProfileCardWithImage(b, ctx, userInfo, imageURL)
+	// Start async calculation of account value and update the card when done
+	inlineMessageID := ctx.CallbackQuery.InlineMessageId
+	steamID := userInfo.SteamID
+
+	steam.CalculateAccountValueAsync(cfg.SteamAPIKey, steamID, userInfo, func(updatedInfo *steam.SteamUserInfo) {
+		// Regenerate the card with the actual account value
+		opts.AccountValue = updatedInfo.AccountValue
+
+		newCardBytes, err := images.GenerateProfileCard(opts)
+		if err != nil {
+			log.Printf("Error generating updated profile card: %v", err)
+			return
+		}
+
+		var updatedFileID string
+		var newImageURL string
+
+		// If DUMP_GROUP is configured, upload to Telegram to get file_id
+		if cfg.DumpGroupID != 0 {
+			sentMsg, err := b.SendPhoto(cfg.DumpGroupID, gotgbot.InputFileByReader("profile.png", bytes.NewReader(newCardBytes)), &gotgbot.SendPhotoOpts{
+				Caption: fmt.Sprintf("Profile card for %s (updated: %s)", username, updatedInfo.AccountValue),
+			})
+			if err != nil {
+				log.Printf("Error uploading updated card to dump group: %v", err)
+			} else {
+				// Get the file_id from the largest photo
+				if len(sentMsg.Photo) > 0 {
+					updatedFileID = sentMsg.Photo[len(sentMsg.Photo)-1].FileId
+					log.Printf("Uploaded updated card to dump group, file_id: %s", updatedFileID)
+				}
+			}
+		}
+
+		// Build reply markup and caption
+		replyMarkup := gotgbot.InlineKeyboardMarkup{
+			InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+				{
+					{Text: "View Profile", Url: updatedInfo.Summary.ProfileURL},
+					{Text: "🔄 Refresh", CallbackData: fmt.Sprintf("mysteam_refresh:%s", updatedInfo.SteamID)},
+				},
+			},
+		}
+
+		caption := formatProfileCaption(updatedInfo)
+
+		// Try to update with file_id first, fallback to URL upload
+		if updatedFileID != "" {
+			// Update using file_id (instant, no fetching needed)
+			_, _, err = b.EditMessageMedia(gotgbot.InputMediaPhoto{
+				Media:     gotgbot.InputFileByID(updatedFileID),
+				Caption:   caption,
+				ParseMode: "HTML",
+			}, &gotgbot.EditMessageMediaOpts{
+				InlineMessageId: inlineMessageID,
+				ReplyMarkup:     replyMarkup,
+			})
+
+			if err != nil {
+				log.Printf("Error updating profile card with file_id: %v", err)
+			} else {
+				log.Printf("Successfully updated profile card with account value using file_id: %s", updatedInfo.AccountValue)
+
+				// Cache with file_id as the "imageURL"
+				err = steam.UpdateProfileCardImage(context.Background(), username, steamID, updatedInfo, profileItems, status, "file_id:"+updatedFileID)
+				if err != nil {
+					log.Printf("Error caching updated profile: %v", err)
+				}
+				return
+			}
+		}
+
+		// Fallback: upload to external service if file_id method failed or unavailable
+		log.Printf("Falling back to external image upload for profile update")
+
+		// Use catbox for the update (more reliable with Telegram)
+		newImageURL, err = utils.UploadImage(newCardBytes, "profile.png")
+		if err != nil {
+			log.Printf("Catbox upload failed for update: %v, trying imgbb", err)
+			// Fallback to imgbb
+			newImageURL, err = utils.UploadImageToImgBB(newCardBytes, "profile.png")
+			if err != nil {
+				log.Printf("Error uploading updated image: %v", err)
+				return
+			}
+		}
+
+		log.Printf("Uploaded updated image to: %s", newImageURL)
+
+		// Give the image host a moment to process and make the image accessible
+		time.Sleep(1 * time.Second)
+
+		_, _, err = b.EditMessageMedia(gotgbot.InputMediaPhoto{
+			Media:     gotgbot.InputFileByURL(newImageURL),
+			Caption:   caption,
+			ParseMode: "HTML",
+		}, &gotgbot.EditMessageMediaOpts{
+			InlineMessageId: inlineMessageID,
+			ReplyMarkup:     replyMarkup,
+		})
+
+		if err != nil {
+			log.Printf("Error updating profile card with account value: %v (URL: %s)", err, newImageURL)
+		} else {
+			log.Printf("Successfully updated profile card with account value: %s", updatedInfo.AccountValue)
+
+			// Cache the updated image URL
+			err = steam.UpdateProfileCardImage(context.Background(), username, steamID, updatedInfo, profileItems, status, newImageURL)
+			if err != nil {
+				log.Printf("Error caching updated image URL: %v", err)
+			}
+		}
+	})
+
+	return nil
 }
 
 // sendProfileCardWithImage sends profile card using an existing image URL
@@ -752,18 +901,13 @@ func sendProfileCardWithImage(b *gotgbot.Bot, ctx *ext.Context, userInfo *steam.
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
 				{Text: "View Profile", Url: userInfo.Summary.ProfileURL},
-				{Text: "🔄 Refresh", CallbackData: fmt.Sprintf("mysteam_refresh:%s", userInfo.Summary.PersonaName)},
+				{Text: "🔄 Refresh", CallbackData: fmt.Sprintf("mysteam_refresh:%s", userInfo.SteamID)},
 			},
 		},
 	}
 
 	// Format caption
 	caption := formatProfileCaption(userInfo)
-
-	// log.Printf("[DEBUG] Attempting to edit message with image URL: %s", imageURL)
-	// log.Printf("[DEBUG] Reply markup: %+v", replyMarkup)
-	// log.Printf("[DEBUG] Caption length: %d", len(caption))
-	// log.Printf("[DEBUG] InlineMessageId: %s", ctx.CallbackQuery.InlineMessageId)
 
 	// Edit message with the generated profile card image
 	_, _, err := b.EditMessageMedia(gotgbot.InputMediaPhoto{
@@ -777,6 +921,38 @@ func sendProfileCardWithImage(b *gotgbot.Bot, ctx *ext.Context, userInfo *steam.
 
 	if err != nil {
 		log.Printf("Error editing message media: %v", err)
+	}
+
+	return err
+}
+
+// sendProfileCardWithFileID sends profile card using a Telegram file_id
+func sendProfileCardWithFileID(b *gotgbot.Bot, ctx *ext.Context, userInfo *steam.SteamUserInfo, fileID string) error {
+	// Build reply markup with View Profile and Refresh buttons
+	replyMarkup := gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "View Profile", Url: userInfo.Summary.ProfileURL},
+				{Text: "🔄 Refresh", CallbackData: fmt.Sprintf("mysteam_refresh:%s", userInfo.SteamID)},
+			},
+		},
+	}
+
+	// Format caption
+	caption := formatProfileCaption(userInfo)
+
+	// Edit message with the profile card using file_id
+	_, _, err := b.EditMessageMedia(gotgbot.InputMediaPhoto{
+		Media:     gotgbot.InputFileByID(fileID),
+		Caption:   caption,
+		ParseMode: "HTML",
+	}, &gotgbot.EditMessageMediaOpts{
+		InlineMessageId: ctx.CallbackQuery.InlineMessageId,
+		ReplyMarkup:     replyMarkup,
+	})
+
+	if err != nil {
+		log.Printf("Error editing message media with file_id: %v", err)
 	}
 
 	return err

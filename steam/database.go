@@ -179,6 +179,11 @@ func (d *Database) ClearProfileCardCache(ctx context.Context, username string) e
 	return err
 }
 
+func (d *Database) ClearProfileCardCacheBySteamID(ctx context.Context, steamID string) error {
+	_, err := d.db.ExecContext(ctx, "DELETE FROM profile_cards_cache WHERE steam_id = ?", steamID)
+	return err
+}
+
 func (d *Database) GetProfileCard(ctx context.Context, username string) (*ProfileCardCache, error) {
 	query := `SELECT username, steam_id, avatar, frame, persona_name, level, country_code,
 			  game_count, games_played, total_hours, account_value, status, background_url,

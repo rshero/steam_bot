@@ -378,67 +378,121 @@ type BatchPriceResponse struct {
 	Data    json.RawMessage `json:"data"`
 }
 
-// FetchBatchPriceOverview fetches prices for multiple apps in a single request
+// FetchBatchPriceOverview fetches prices for multiple apps in batches
 // Returns: priceOverviews map, total price in cents, appIds without price data, error
 func FetchBatchPriceOverview(appIds []int, countryCode string) (map[string]PriceOverview, int, []int, error) {
 	if len(appIds) == 0 {
 		return map[string]PriceOverview{}, 0, nil, nil
 	}
 
-	// Convert app IDs to strings and join with commas
-	appIdStrs := make([]string, len(appIds))
-	for i, id := range appIds {
-		appIdStrs[i] = fmt.Sprintf("%d", id)
-	}
-	appIdsParam := strings.Join(appIdStrs, ",")
-
 	// Use 'in' as default country code if not provided
 	if countryCode == "" {
 		countryCode = "in"
 	}
 
-	apiURL := fmt.Sprintf("https://store.steampowered.com/api/appdetails?appids=%s&cc=%s&filters=price_overview",
-		appIdsParam, countryCode)
-
-	var response map[string]BatchPriceResponse
-	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
-		return nil, 0, nil, fmt.Errorf("fetching batch price overview: %w", err)
-	}
-
+	// Process in batches of 50 to avoid overwhelming the API and improve response time
+	const batchSize = 50
 	priceOverviews := make(map[string]PriceOverview)
 	foundAppIds := make(map[int]bool)
 	totalPrice := 0
 
-	for appID, appData := range response {
-		if !appData.Success || len(appData.Data) == 0 {
+	// Use goroutines to fetch batches concurrently
+	type batchResult struct {
+		prices    map[string]PriceOverview
+		found     map[int]bool
+		totalCost int
+		err       error
+	}
+
+	numBatches := (len(appIds) + batchSize - 1) / batchSize
+	results := make(chan batchResult, numBatches)
+
+	// Limit concurrent requests to avoid rate limiting
+	semaphore := make(chan struct{}, 3)
+
+	for i := 0; i < len(appIds); i += batchSize {
+		end := i + batchSize
+		if end > len(appIds) {
+			end = len(appIds)
+		}
+		batch := appIds[i:end]
+
+		go func(batchAppIds []int) {
+			semaphore <- struct{}{}        // Acquire
+			defer func() { <-semaphore }() // Release
+
+			result := batchResult{
+				prices: make(map[string]PriceOverview),
+				found:  make(map[int]bool),
+			}
+
+			// Convert app IDs to strings and join with commas
+			appIdStrs := make([]string, len(batchAppIds))
+			for j, id := range batchAppIds {
+				appIdStrs[j] = fmt.Sprintf("%d", id)
+			}
+			appIdsParam := strings.Join(appIdStrs, ",")
+
+			apiURL := fmt.Sprintf("https://store.steampowered.com/api/appdetails?appids=%s&cc=%s&filters=price_overview",
+				appIdsParam, countryCode)
+
+			var response map[string]BatchPriceResponse
+			if err := utils.HttpGetJSON(apiURL, &response); err != nil {
+				result.err = fmt.Errorf("fetching batch price overview: %w", err)
+				results <- result
+				return
+			}
+
+			for appID, appData := range response {
+				if !appData.Success || len(appData.Data) == 0 {
+					continue
+				}
+
+				// Try to parse the data field - it might be an object or an array
+				var dataObj struct {
+					PriceOverview *PriceOverview `json:"price_overview"`
+				}
+
+				if err := json.Unmarshal(appData.Data, &dataObj); err != nil {
+					// If unmarshal fails, data might be an array or invalid - skip this app
+					continue
+				}
+
+				if dataObj.PriceOverview != nil && dataObj.PriceOverview.Final > 0 {
+					// Skip if the formatted price is "Free" (temporary promotions or incorrect data)
+					if dataObj.PriceOverview.FinalFormatted == "Free" {
+						continue
+					}
+					result.prices[appID] = *dataObj.PriceOverview
+					result.totalCost += dataObj.PriceOverview.Final
+
+					// Mark this app ID as found (convert string back to int)
+					var intID int
+					if _, err := fmt.Sscanf(appID, "%d", &intID); err == nil {
+						result.found[intID] = true
+					}
+				}
+			}
+
+			results <- result
+		}(batch)
+	}
+
+	// Collect results from all batches
+	for i := 0; i < numBatches; i++ {
+		result := <-results
+		if result.err != nil {
+			log.Printf("Error fetching batch: %v", result.err)
 			continue
 		}
 
-		// Try to parse the data field - it might be an object or an array
-		var dataObj struct {
-			PriceOverview *PriceOverview `json:"price_overview"`
+		for appID, overview := range result.prices {
+			priceOverviews[appID] = overview
 		}
-
-		if err := json.Unmarshal(appData.Data, &dataObj); err != nil {
-			// If unmarshal fails, data might be an array or invalid - skip this app
-			continue
+		for appID := range result.found {
+			foundAppIds[appID] = true
 		}
-
-		if dataObj.PriceOverview != nil && dataObj.PriceOverview.Final > 0 {
-			// Skip if the formatted price is "Free" (temporary promotions or incorrect data)
-			if dataObj.PriceOverview.FinalFormatted == "Free" {
-				continue
-			}
-			priceOverviews[appID] = *dataObj.PriceOverview
-			totalPrice += dataObj.PriceOverview.Final
-
-			// Mark this app ID as found (convert string back to int)
-			if id, err := fmt.Sscanf(appID, "%d", new(int)); err == nil && id == 1 {
-				var intID int
-				fmt.Sscanf(appID, "%d", &intID)
-				foundAppIds[intID] = true
-			}
-		}
+		totalPrice += result.totalCost
 	}
 
 	// Find missing app IDs
@@ -685,10 +739,11 @@ func GetSteamUserInfo(apiKey, username string) (*SteamUserInfo, error) {
 }
 
 // GetProfileCardData fetches and caches profile card data for a username
-func GetProfileCardData(ctx context.Context, apiKey, username string) (*SteamUserInfo, *ProfileItems, string, string, error) {
+// When skipAccountValue is true, account value will be set to "-" and can be calculated later
+func GetProfileCardData(ctx context.Context, apiKey, username string, skipAccountValue bool) (*SteamUserInfo, *ProfileItems, string, string, error) {
 	if db != nil {
 		if cached, err := db.GetProfileCard(ctx, username); err == nil && cached != nil {
-			log.Printf("[DB] Profile card cache hit for username %s", username)
+			log.Printf("[DB] Profile card cache hit for username %s (SteamID from cache: %s)", username, cached.SteamID)
 
 			info := &SteamUserInfo{
 				SteamID: cached.SteamID,
@@ -721,9 +776,20 @@ func GetProfileCardData(ctx context.Context, apiKey, username string) (*SteamUse
 		}
 	}
 
-	steamID, err := ResolveSteamVanityURL(apiKey, username)
-	if err != nil {
-		return nil, nil, "", "", err
+	// Check if username is already a numeric SteamID64 (17 digits starting with 7656119)
+	// If so, skip vanity URL resolution
+	var steamID string
+	if len(username) == 17 && strings.HasPrefix(username, "7656119") {
+		// It's already a SteamID64, use it directly
+		steamID = username
+		log.Printf("Input is already a SteamID64: %s", steamID)
+	} else {
+		// It's a vanity URL/username, resolve it
+		var err error
+		steamID, err = ResolveSteamVanityURL(apiKey, username)
+		if err != nil {
+			return nil, nil, "", "", err
+		}
 	}
 
 	summary, err := GetSteamPlayerSummary(apiKey, steamID)
@@ -743,23 +809,26 @@ func GetProfileCardData(ctx context.Context, apiKey, username string) (*SteamUse
 		gameCount = gamesResponse.Response.GameCount
 		gamesPlayed, totalHours = CalculateGameStats(gamesResponse.Response.Games)
 
-		// Calculate account value
-		appIds := make([]int, len(gamesResponse.Response.Games))
-		for i, game := range gamesResponse.Response.Games {
-			appIds[i] = game.AppID
-		}
+		// Only calculate account value if not skipping
+		if !skipAccountValue {
+			// Calculate account value
+			appIds := make([]int, len(gamesResponse.Response.Games))
+			for i, game := range gamesResponse.Response.Games {
+				appIds[i] = game.AppID
+			}
 
-		// Get country code from summary, default to "in"
-		countryCode := summary.CountryCode
-		if countryCode == "" {
-			countryCode = "in"
-		}
+			// Get country code from summary, default to "in"
+			countryCode := summary.CountryCode
+			if countryCode == "" {
+				countryCode = "in"
+			}
 
-		_, totalPrice, _, priceErr := FetchBatchPriceOverview(appIds, countryCode)
-		if priceErr == nil {
-			currencySymbol := GetCurrencySymbol(countryCode)
-			totalPriceFormatted := float64(totalPrice) / 100.0
-			accountValue = fmt.Sprintf("%s%.0f", currencySymbol, totalPriceFormatted)
+			_, totalPrice, _, priceErr := FetchBatchPriceOverview(appIds, countryCode)
+			if priceErr == nil {
+				currencySymbol := GetCurrencySymbol(countryCode)
+				totalPriceFormatted := float64(totalPrice) / 100.0
+				accountValue = fmt.Sprintf("%s%.0f", currencySymbol, totalPriceFormatted)
+			}
 		}
 	}
 
@@ -778,6 +847,39 @@ func GetProfileCardData(ctx context.Context, apiKey, username string) (*SteamUse
 
 	// Note: imageURL will be empty here and updated later by the caller after image upload
 	return info, profileItems, status, "", nil
+}
+
+// CalculateAccountValueAsync calculates the account value asynchronously
+// and calls the callback function with the updated SteamUserInfo when done
+func CalculateAccountValueAsync(apiKey, steamID string, info *SteamUserInfo, callback func(*SteamUserInfo)) {
+	go func() {
+		gamesResponse, err := GetSteamOwnedGames(apiKey, steamID)
+		if err != nil {
+			log.Printf("Error fetching games for account value calculation: %v", err)
+			return
+		}
+
+		appIds := make([]int, len(gamesResponse.Response.Games))
+		for i, game := range gamesResponse.Response.Games {
+			appIds[i] = game.AppID
+		}
+
+		// Get country code from summary, default to "in"
+		countryCode := info.Summary.CountryCode
+		if countryCode == "" {
+			countryCode = "in"
+		}
+
+		_, totalPrice, _, priceErr := FetchBatchPriceOverview(appIds, countryCode)
+		if priceErr == nil {
+			currencySymbol := GetCurrencySymbol(countryCode)
+			totalPriceFormatted := float64(totalPrice) / 100.0
+			info.AccountValue = fmt.Sprintf("%s%.0f", currencySymbol, totalPriceFormatted)
+			callback(info)
+		} else {
+			log.Printf("Error calculating account value: %v", priceErr)
+		}
+	}()
 }
 
 // UpdateProfileCardImage updates the cached image URL for a profile card

@@ -13,6 +13,7 @@ type Config struct {
 	ChannelID   int64
 	HltbAPI     string
 	SteamAPIKey string
+	DumpGroupID int64
 }
 
 func LoadConfig() *Config {
@@ -39,10 +40,22 @@ func LoadConfig() *Config {
 	hltbAPI := os.Getenv("HLTB_API")
 	steamAPIKey := os.Getenv("STEAM_API_KEY")
 
+	// DUMP_GROUP is optional - for uploading profile cards to get file_id
+	dumpGroupID := int64(0)
+	if dumpGroupIDStr := os.Getenv("DUMP_GROUP"); dumpGroupIDStr != "" {
+		parsedID, err := strconv.ParseInt(dumpGroupIDStr, 10, 64)
+		if err != nil {
+			log.Printf("Warning: Invalid DUMP_GROUP value: %v", err)
+		} else {
+			dumpGroupID = parsedID
+		}
+	}
+
 	return &Config{
 		BotToken:    botToken,
 		ChannelID:   channelID,
 		HltbAPI:     hltbAPI,
 		SteamAPIKey: steamAPIKey,
+		DumpGroupID: dumpGroupID,
 	}
 }

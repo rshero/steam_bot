@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+
 	// "log"
 	"mime/multipart"
 	"net/http"
@@ -167,7 +169,7 @@ func UploadImageToImgBB(data []byte, filename string) (string, error) {
 
 	bodyBytes, _ := io.ReadAll(resp.Body)
 
-	// log.Printf("[DEBUG] ImgBB response: %s", string(bodyBytes))
+	log.Printf("[DEBUG] ImgBB response: %s", string(bodyBytes))
 
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return "", fmt.Errorf("decoding response: %w", err)
@@ -187,7 +189,7 @@ func UploadImageToImgBB(data []byte, filename string) (string, error) {
 		return "", fmt.Errorf("no image URL in response")
 	}
 
-	// log.Printf("[DEBUG] ImgBB returned URL: %s (display_url: %s, url: %s)", imageURL, result.Image.DisplayURL, result.Image.URL)
+	log.Printf("[DEBUG] ImgBB returned URL: %s (display_url: %s, url: %s)", imageURL, result.Image.DisplayURL, result.Image.URL)
 
 	return imageURL, nil
 }

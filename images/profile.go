@@ -60,9 +60,9 @@ const (
 	HoursValueY  = 414 // Figma: 130 + 284
 	HoursLabelX  = 625 // Figma: 64 + 547
 	HoursLabelY  = 451 // Figma: 167 + 284
-	ValueLabelX  = 898 // Figma: 305 + 547
+	ValueLabelX  = 888 // Figma: 305 + 547
 	ValueLabelY  = 406 // Figma: 122 + 284
-	ValueAmountX = 893 // Figma: 300 + 547
+	ValueAmountX = 879 // Figma: 300 + 547
 	ValueAmountY = 451 // Figma: 167 + 284
 
 	// Progress bar settings
@@ -283,7 +283,7 @@ func drawStatusIndicator(dc *advancegg.Context, status string) {
 	dc.Fill()
 }
 
-// drawUsername draws the username below the avatar
+// drawUsername draws the username below the avatar (centered)
 func drawUsername(dc *advancegg.Context, username string) error {
 	img := dc.Image().(*image.RGBA)
 
@@ -292,11 +292,15 @@ func drawUsername(dc *advancegg.Context, username string) error {
 		return err
 	}
 
+	textWidth := font.MeasureString(face, username)
+	avatarCenterX := float64(AvatarX + AvatarSize/2)
+	centeredX := int(avatarCenterX - float64(textWidth>>6)/2)
+
 	drawer := &font.Drawer{
 		Dst:  img,
 		Src:  image.NewUniform(color.White),
 		Face: face,
-		Dot:  fixed.P(UsernameX, UsernameY),
+		Dot:  fixed.P(centeredX, UsernameY),
 	}
 	drawer.DrawString(username)
 

@@ -867,9 +867,17 @@ func parseCallbackData(data string) (CallbackData, error) {
 		return result, nil
 	}
 
-	// Special handling for mysteam callbacks (username only, no userID)
+	// Special handling for mysteam callbacks
 	if result.Type == CallbackMySteam || result.Type == CallbackMySteamRefresh {
-		result.AppID = payload // Username goes in AppID field
+		// For mysteam callbacks, payload format is "username_userID" or just "username"
+		parts := strings.Split(payload, "_")
+		result.AppID = parts[0] // Username goes in AppID field
+		if len(parts) == 2 {
+			userID, err := strconv.ParseInt(parts[1], 10, 64)
+			if err == nil {
+				result.UserID = userID
+			}
+		}
 		return result, nil
 	}
 

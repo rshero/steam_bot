@@ -896,67 +896,67 @@ func GetCurrencySymbol(countryCode string) string {
 	countryCode = strings.ToUpper(countryCode)
 
 	currencyMap := map[string]string{
-		"US": "$",   // United States Dollar
-		"GB": "£",   // British Pound
-		"EU": "€",   // Euro (used for many EU countries)
-		"DE": "€",   // Germany
-		"FR": "€",   // France
-		"IT": "€",   // Italy
-		"ES": "€",   // Spain
-		"NL": "€",   // Netherlands
-		"BE": "€",   // Belgium
-		"AT": "€",   // Austria
-		"PT": "€",   // Portugal
-		"IE": "€",   // Ireland
-		"FI": "€",   // Finland
-		"GR": "€",   // Greece
-		"JP": "¥",   // Japanese Yen
-		"CN": "¥",   // Chinese Yuan
-		"KR": "₩",   // Korean Won
-		"IN": "₹",   // Indian Rupee
-		"RU": "₽",   // Russian Ruble
-		"BR": "R$",  // Brazilian Real
-		"MX": "$",   // Mexican Peso
-		"AU": "A$",  // Australian Dollar
-		"CA": "C$",  // Canadian Dollar
-		"CH": "CHF", // Swiss Franc
-		"SE": "kr",  // Swedish Krona
-		"NO": "kr",  // Norwegian Krone
-		"DK": "kr",  // Danish Krone
-		"PL": "zł",  // Polish Zloty
-		"TR": "₺",   // Turkish Lira
-		"ZA": "R",   // South African Rand
-		"AR": "$",   // Argentine Peso
-		"CL": "$",   // Chilean Peso
-		"CO": "$",   // Colombian Peso
-		"PE": "S/",  // Peruvian Sol
-		"HK": "HK$", // Hong Kong Dollar
-		"TW": "NT$", // Taiwan Dollar
-		"SG": "S$",  // Singapore Dollar
-		"MY": "RM",  // Malaysian Ringgit
-		"TH": "฿",   // Thai Baht
-		"ID": "Rp",  // Indonesian Rupiah
-		"PH": "₱",   // Philippine Peso
-		"VN": "₫",   // Vietnamese Dong
-		"NZ": "NZ$", // New Zealand Dollar
-		"IL": "₪",   // Israeli Shekel
-		"SA": "SR",  // Saudi Riyal
-		"AE": "AED", // UAE Dirham
-		"KW": "KD",  // Kuwaiti Dinar
-		"QA": "QR",  // Qatari Riyal
-		"CZ": "Kč",  // Czech Koruna
-		"HU": "Ft",  // Hungarian Forint
-		"RO": "lei", // Romanian Leu
-		"BG": "лв",  // Bulgarian Lev
-		"HR": "kn",  // Croatian Kuna
-		"UA": "₴",   // Ukrainian Hryvnia
-		"KZ": "₸",   // Kazakhstani Tenge
+		"US": "$",    // United States Dollar
+		"GB": "£",    // British Pound
+		"EU": "€",    // Euro (used for many EU countries)
+		"DE": "€",    // Germany
+		"FR": "€",    // France
+		"IT": "€",    // Italy
+		"ES": "€",    // Spain
+		"NL": "€",    // Netherlands
+		"BE": "€",    // Belgium
+		"AT": "€",    // Austria
+		"PT": "€",    // Portugal
+		"IE": "€",    // Ireland
+		"FI": "€",    // Finland
+		"GR": "€",    // Greece
+		"JP": "¥",    // Japanese Yen
+		"CN": "¥",    // Chinese Yuan
+		"KR": "₩",    // Korean Won
+		"IN": "Rs. ", // Indian Rupee (using ASCII-safe notation for font compatibility)
+		"RU": "₽",    // Russian Ruble
+		"BR": "R$",   // Brazilian Real
+		"MX": "$",    // Mexican Peso
+		"AU": "A$",   // Australian Dollar
+		"CA": "C$",   // Canadian Dollar
+		"CH": "CHF",  // Swiss Franc
+		"SE": "kr",   // Swedish Krona
+		"NO": "kr",   // Norwegian Krone
+		"DK": "kr",   // Danish Krone
+		"PL": "zł",   // Polish Zloty
+		"TR": "₺",    // Turkish Lira
+		"ZA": "R",    // South African Rand
+		"AR": "$",    // Argentine Peso
+		"CL": "$",    // Chilean Peso
+		"CO": "$",    // Colombian Peso
+		"PE": "S/",   // Peruvian Sol
+		"HK": "HK$",  // Hong Kong Dollar
+		"TW": "NT$",  // Taiwan Dollar
+		"SG": "S$",   // Singapore Dollar
+		"MY": "RM",   // Malaysian Ringgit
+		"TH": "฿",    // Thai Baht
+		"ID": "Rp",   // Indonesian Rupiah
+		"PH": "₱",    // Philippine Peso
+		"VN": "₫",    // Vietnamese Dong
+		"NZ": "NZ$",  // New Zealand Dollar
+		"IL": "₪",    // Israeli Shekel
+		"SA": "SR",   // Saudi Riyal
+		"AE": "AED",  // UAE Dirham
+		"KW": "KD",   // Kuwaiti Dinar
+		"QA": "QR",   // Qatari Riyal
+		"CZ": "Kč",   // Czech Koruna
+		"HU": "Ft",   // Hungarian Forint
+		"RO": "lei",  // Romanian Leu
+		"BG": "лв",   // Bulgarian Lev
+		"HR": "kn",   // Croatian Kuna
+		"UA": "₴",    // Ukrainian Hryvnia
+		"KZ": "₸",    // Kazakhstani Tenge
 	}
 
 	if symbol, ok := currencyMap[countryCode]; ok {
 		return symbol
 	}
-	return "₹" // Default to INR
+	return "Rs. " // Default to INR (ASCII-safe)
 }
 
 func personaStateToInt(status string) int {

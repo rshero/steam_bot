@@ -899,6 +899,7 @@ func GetCurrencySymbol(countryCode string) string {
 		"US": "$",    // United States Dollar
 		"GB": "£",    // British Pound
 		"EU": "€",    // Euro (used for many EU countries)
+		"MC": "€",    // Monaco Euro
 		"DE": "€",    // Germany
 		"FR": "€",    // France
 		"IT": "€",    // Italy

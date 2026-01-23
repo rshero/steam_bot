@@ -304,7 +304,7 @@ func parseGameTrackingCallback(data string) (GameTrackingCallbackData, error) {
 			if len(parts) > 1 {
 				result.UserID, _ = strconv.ParseInt(parts[1], 10, 64)
 			}
-		case GTCallbackEditGameList, GTCallbackBackToEditList, GTCallbackBackToEditGameList:
+		case GTCallbackEditGameList, GTCallbackBackToEditGameList:
 			// Format: PAGE_USERID
 			result.Page, _ = strconv.Atoi(parts[0])
 			if len(parts) > 1 {

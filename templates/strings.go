@@ -60,10 +60,43 @@ var InlineCommands = map[string]InlineCommand{
 	},
 }
 
+// GameTrackingHelp contains help text for game tracking commands
+const GameTrackingHelp = `<b>Game Tracking Commands</b>
+
+<b>/addgame</b> ─ Add a game to your library
+  <code>/addgame game name</code>
+
+  <b>Optional Flags:</b>
+  <code>-s</code> or <code>--status</code> ─ Set status
+    Values: <code>completed</code> (c), <code>playing</code> (p), <code>notstarted</code> (ns), <code>onhold</code> (oh), <code>dropped</code> (d), <code>paused</code> (pa)
+  <code>-t</code> or <code>--time</code> ─ Set playtime in hours
+
+  Examples:
+  <code>/addgame Cyberpunk 2077</code>
+  <code>/addgame Elden Ring -s completed -t 120</code>
+  <code>/addgame Hades -s playing</code>
+
+<b>/editgame</b> ─ Edit a game in your library
+
+<b>/removegame</b> ─ Remove a game from your library
+
+<b>/mygamestats</b> ─ View your gaming stats and library`
+
 // Commands maps command names to their responses (for /command handling)
+// Note: Game tracking commands (addgame, removegame, etc.) are NOT included here
+// because they have dedicated handlers registered in main.go
 var Commands = map[string]string{
 	"start": "Welcome to <b>SteamBot</b>!\n\nUse the inline to search for Steam games and get detailed info.",
-	"help":  "<b>How to use SteamBot:</b>\n\n• Type <code>@steam_offersbot game name</code> in any chat to search\n• Click on a result to share game info\n• Use buttons to view details, requirements, and more",
+	"help": "<b>How to use SteamBot:</b>\n\n" +
+		"<b>Inline Search</b>\n" +
+		"• Type <code>@steam_offersbot game name</code> in any chat to search\n" +
+		"• Click on a result to share game info\n" +
+		"• Use buttons to view details, requirements, and more\n\n" +
+		"<b>Game Tracking</b>\n" +
+		"• <code>/addgame name</code> ─ Add a game to your library\n" +
+		"• <code>/editgame</code> ─ Edit a game in your library\n" +
+		"• <code>/removegame</code> ─ Remove a game from your library\n" +
+		"• <code>/mygamestats</code> ─ View your gaming stats",
 }
 
 // CommandKeys returns all command names for regex pattern

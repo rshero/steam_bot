@@ -18,6 +18,22 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 )
 
+// extractCommandArgs extracts arguments from a command, handling @botusername suffix
+// e.g., "/addgame@botname game name" -> "game name"
+func extractCommandArgs(text, command string) string {
+	// Remove the command prefix (e.g., "/addgame")
+	args := strings.TrimPrefix(text, "/"+command)
+	// Remove @botusername if present (everything up to the first space)
+	if strings.HasPrefix(args, "@") {
+		if idx := strings.Index(args, " "); idx != -1 {
+			args = args[idx:]
+		} else {
+			args = ""
+		}
+	}
+	return strings.TrimSpace(args)
+}
+
 // editMessageText is a helper that handles editing both regular and inline messages
 func editMessageText(b *gotgbot.Bot, ctx *ext.Context, text string, opts *gotgbot.EditMessageTextOpts) error {
 	if ctx.CallbackQuery.InlineMessageId != "" {
@@ -400,7 +416,7 @@ func parseAddGameFlags(args string) (string, *steam.GameStatus, *float64, error)
 }
 
 func HandleAddGameCommand(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config) error {
-	args := strings.TrimSpace(strings.TrimPrefix(ctx.EffectiveMessage.Text, "/addgame"))
+	args := extractCommandArgs(ctx.EffectiveMessage.Text, "addgame")
 
 	if args == "" {
 		_, err := ctx.EffectiveMessage.Reply(b, templates.GameTrackingHelp,
@@ -1922,7 +1938,7 @@ func HandleImportSteamCommand(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Conf
 		return err
 	}
 
-	args := strings.TrimSpace(strings.TrimPrefix(ctx.EffectiveMessage.Text, "/importsteam"))
+	args := extractCommandArgs(ctx.EffectiveMessage.Text, "importsteam")
 
 	if args == "" {
 		_, err := ctx.EffectiveMessage.Reply(b,

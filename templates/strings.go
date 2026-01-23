@@ -63,7 +63,7 @@ var InlineCommands = map[string]InlineCommand{
 		Description:  "View your gaming library stats",
 		Message:      "<b>My Game Stats</b>\n\nFetching your gaming stats...",
 		SwitchQuery:  ".mygamestats",
-		ThumbnailUrl: "https://i.ibb.co/j9vY5DJb/icons8-gamepad-100.png",
+		ThumbnailUrl: "https://i.ibb.co/60yJBMxD/icons8-games-folder-64.png",
 	},
 }
 

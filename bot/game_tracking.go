@@ -298,12 +298,19 @@ func parseGameTrackingCallback(data string) (GameTrackingCallbackData, error) {
 	parts := strings.Split(payload, "_")
 
 	if len(parts) > 0 && parts[0] != "" {
-		if result.Type == GTCallbackAddGame || result.Type == GTCallbackAddCustomGame {
+		switch result.Type {
+		case GTCallbackAddGame, GTCallbackAddCustomGame:
 			result.AppID = parts[0]
 			if len(parts) > 1 {
 				result.UserID, _ = strconv.ParseInt(parts[1], 10, 64)
 			}
-		} else {
+		case GTCallbackEditGameList, GTCallbackBackToEditList, GTCallbackBackToEditGameList:
+			// Format: PAGE_USERID
+			result.Page, _ = strconv.Atoi(parts[0])
+			if len(parts) > 1 {
+				result.UserID, _ = strconv.ParseInt(parts[1], 10, 64)
+			}
+		default:
 			// For other callbacks, first part is game ID
 			result.GameID, _ = strconv.ParseInt(parts[0], 10, 64)
 			if len(parts) > 1 {
@@ -945,7 +952,7 @@ func sendEditGameList(b *gotgbot.Bot, ctx *ext.Context, games []steam.UserGame, 
 	var msg strings.Builder
 	msg.WriteString("<b>Edit Game</b>\n\n")
 	msg.WriteString("Select a game to edit:\n")
-	fmt.Fprintf(&msg, "<i>Page %d</i>\n\n", page+1)
+	fmt.Fprintf(&msg, "Page %d\n\n", page+1)
 
 	keyboard := make([][]gotgbot.InlineKeyboardButton, 0)
 
@@ -965,7 +972,7 @@ func sendEditGameList(b *gotgbot.Bot, ctx *ext.Context, games []steam.UserGame, 
 	var navRow []gotgbot.InlineKeyboardButton
 	if page > 0 {
 		navRow = append(navRow, gotgbot.InlineKeyboardButton{
-			Text:         "‹ Prev",
+			Text:         "❮",
 			CallbackData: fmt.Sprintf("gt_edit_list:%d_%d", page-1, userID),
 		})
 	}
@@ -1447,7 +1454,7 @@ func handleEditGameListCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTra
 	var msg strings.Builder
 	msg.WriteString("<b>Edit Game</b>\n\n")
 	msg.WriteString("Select a game to edit:\n")
-	fmt.Fprintf(&msg, "<i>Page %d</i>\n\n", cbData.Page+1)
+	fmt.Fprintf(&msg, "Page %d\n\n", cbData.Page+1)
 
 	keyboard := make([][]gotgbot.InlineKeyboardButton, 0)
 
@@ -1466,7 +1473,7 @@ func handleEditGameListCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTra
 	var navRow []gotgbot.InlineKeyboardButton
 	if cbData.Page > 0 {
 		navRow = append(navRow, gotgbot.InlineKeyboardButton{
-			Text:         "‹ Prev",
+			Text:         "❮",
 			CallbackData: fmt.Sprintf("gt_edit_list:%d_%d", cbData.Page-1, cbData.UserID),
 		})
 	}
@@ -1788,7 +1795,7 @@ func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 	var navRow []gotgbot.InlineKeyboardButton
 	if cbData.Page > 0 {
 		navRow = append(navRow, gotgbot.InlineKeyboardButton{
-			Text:         "‹ Prev",
+			Text:         "❮",
 			CallbackData: fmt.Sprintf("%s:%d_%d", callbackPrefix, cbData.Page-1, cbData.UserID),
 		})
 	}
@@ -1880,7 +1887,7 @@ func handleListBacklogCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrac
 	var navRow []gotgbot.InlineKeyboardButton
 	if cbData.Page > 0 {
 		navRow = append(navRow, gotgbot.InlineKeyboardButton{
-			Text:         "‹ Prev",
+			Text:         "❮",
 			CallbackData: fmt.Sprintf("gt_list_backlog:%d_%d", cbData.Page-1, cbData.UserID),
 		})
 	}

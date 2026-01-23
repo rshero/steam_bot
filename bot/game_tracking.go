@@ -944,7 +944,8 @@ func HandleEditGameCommand(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config)
 func sendEditGameList(b *gotgbot.Bot, ctx *ext.Context, games []steam.UserGame, userID int64, page int, hasNextPage bool) error {
 	var msg strings.Builder
 	msg.WriteString("<b>Edit Game</b>\n\n")
-	msg.WriteString("Select a game to edit:\n\n")
+	msg.WriteString("Select a game to edit:\n")
+	fmt.Fprintf(&msg, "<i>Page %d</i>\n\n", page+1)
 
 	keyboard := make([][]gotgbot.InlineKeyboardButton, 0)
 
@@ -970,7 +971,7 @@ func sendEditGameList(b *gotgbot.Bot, ctx *ext.Context, games []steam.UserGame, 
 	}
 	if hasNextPage {
 		navRow = append(navRow, gotgbot.InlineKeyboardButton{
-			Text:         "Next ›",
+			Text:         "❯",
 			CallbackData: fmt.Sprintf("gt_edit_list:%d_%d", page+1, userID),
 		})
 	}
@@ -1445,7 +1446,8 @@ func handleEditGameListCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTra
 
 	var msg strings.Builder
 	msg.WriteString("<b>Edit Game</b>\n\n")
-	msg.WriteString("Select a game to edit:\n\n")
+	msg.WriteString("Select a game to edit:\n")
+	fmt.Fprintf(&msg, "<i>Page %d</i>\n\n", cbData.Page+1)
 
 	keyboard := make([][]gotgbot.InlineKeyboardButton, 0)
 
@@ -1470,7 +1472,7 @@ func handleEditGameListCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTra
 	}
 	if hasNextPage {
 		navRow = append(navRow, gotgbot.InlineKeyboardButton{
-			Text:         "Next ›",
+			Text:         "❯",
 			CallbackData: fmt.Sprintf("gt_edit_list:%d_%d", cbData.Page+1, cbData.UserID),
 		})
 	}
@@ -1796,7 +1798,7 @@ func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 	})
 	if hasNextPage {
 		navRow = append(navRow, gotgbot.InlineKeyboardButton{
-			Text:         "Next ›",
+			Text:         "❯",
 			CallbackData: fmt.Sprintf("%s:%d_%d", callbackPrefix, cbData.Page+1, cbData.UserID),
 		})
 	}
@@ -1888,7 +1890,7 @@ func handleListBacklogCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrac
 	})
 	if hasNextPage {
 		navRow = append(navRow, gotgbot.InlineKeyboardButton{
-			Text:         "Next ›",
+			Text:         "❯",
 			CallbackData: fmt.Sprintf("gt_list_backlog:%d_%d", cbData.Page+1, cbData.UserID),
 		})
 	}

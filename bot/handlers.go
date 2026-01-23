@@ -228,6 +228,11 @@ func handleInlineDotCommand(b *gotgbot.Bot, ctx *ext.Context, cmd string) error 
 		return handleMySteamInlineQuery(b, ctx, cmd, userID)
 	}
 
+	// Handle ".mygamestats"
+	if cmd == "mygamestats" {
+		return handleMyGameStatsInlineQuery(b, ctx, userID)
+	}
+
 	inlineCmd, ok := templates.InlineCommands[cmd]
 	if !ok {
 		return nil
@@ -298,15 +303,64 @@ func handleMySteamInlineQuery(b *gotgbot.Bot, ctx *ext.Context, cmd string, user
 	return err
 }
 
+func handleMyGameStatsInlineQuery(b *gotgbot.Bot, ctx *ext.Context, userID int64) error {
+	inlineCmd := templates.InlineCommands["mygamestats"]
+
+	results := []gotgbot.InlineQueryResult{
+		gotgbot.InlineQueryResultArticle{
+			Id:           fmt.Sprintf("mygamestats_%d", userID),
+			Title:        inlineCmd.Title,
+			Description:  "View your gaming library stats",
+			ThumbnailUrl: inlineCmd.ThumbnailUrl,
+			InputMessageContent: gotgbot.InputTextMessageContent{
+				MessageText: "<b>My Gaming Stats</b>\n\nClick the button below to load your stats.",
+				ParseMode:   "HTML",
+			},
+			ReplyMarkup: &gotgbot.InlineKeyboardMarkup{
+				InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+					{{Text: "Load Stats", CallbackData: fmt.Sprintf("gt_inline_stats:_%d", userID)}},
+				},
+			},
+		},
+	}
+
+	_, err := ctx.InlineQuery.Answer(b, results, &gotgbot.AnswerInlineQueryOpts{
+		CacheTime:  60,
+		IsPersonal: true,
+	})
+	return err
+}
+
 func showAllInlineCommands(b *gotgbot.Bot, ctx *ext.Context) error {
+	userID := ctx.InlineQuery.From.Id
 	results := make([]gotgbot.InlineQueryResult, 0, len(templates.InlineCommands))
 
 	for name, cmd := range templates.InlineCommands {
+		// Handle mygamestats specially with callback button
+		if name == "mygamestats" {
+			results = append(results, gotgbot.InlineQueryResultArticle{
+				Id:           fmt.Sprintf("mygamestats_%d", userID),
+				Title:        cmd.Title,
+				Description:  cmd.Description,
+				ThumbnailUrl: cmd.ThumbnailUrl,
+				InputMessageContent: gotgbot.InputTextMessageContent{
+					MessageText: "<b>My Gaming Stats</b>\n\nClick the button below to load your stats.",
+					ParseMode:   "HTML",
+				},
+				ReplyMarkup: &gotgbot.InlineKeyboardMarkup{
+					InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+						{{Text: "Load Stats", CallbackData: fmt.Sprintf("gt_inline_stats:_%d", userID)}},
+					},
+				},
+			})
+			continue
+		}
 		results = append(results, buildInlineCommandResult(name, cmd))
 	}
 
 	_, err := ctx.InlineQuery.Answer(b, results, &gotgbot.AnswerInlineQueryOpts{
-		CacheTime: 300,
+		CacheTime:  60,
+		IsPersonal: true,
 	})
 	return err
 }

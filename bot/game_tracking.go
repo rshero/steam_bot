@@ -18,6 +18,25 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 )
 
+// editMessageText is a helper that handles editing both regular and inline messages
+func editMessageText(b *gotgbot.Bot, ctx *ext.Context, text string, opts *gotgbot.EditMessageTextOpts) error {
+	if ctx.CallbackQuery.InlineMessageId != "" {
+		// Inline message - use InlineMessageId
+		if opts == nil {
+			opts = &gotgbot.EditMessageTextOpts{}
+		}
+		opts.InlineMessageId = ctx.CallbackQuery.InlineMessageId
+		_, _, err := b.EditMessageText(text, opts)
+		return err
+	}
+	// Regular message
+	if ctx.CallbackQuery.Message != nil {
+		_, _, err := ctx.CallbackQuery.Message.EditText(b, text, opts)
+		return err
+	}
+	return nil
+}
+
 // PendingEditType represents the type of pending edit
 type PendingEditType int
 
@@ -124,6 +143,7 @@ const (
 	GTCallbackListPlaying
 	GTCallbackStatsRefresh
 	GTCallbackStatsBack
+	GTCallbackInlineStats
 	GTCallbackStatusSet
 	GTCallbackRatingSet
 	GTCallbackImportAll
@@ -216,6 +236,8 @@ func HandleGameTrackingCallback(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Co
 		return handleStatsRefreshCallback(b, ctx, cbData)
 	case GTCallbackStatsBack:
 		return handleStatsBackCallback(b, ctx, cbData)
+	case GTCallbackInlineStats:
+		return handleInlineStatsCallback(b, ctx, cbData)
 	case GTCallbackBackToEditList:
 		return handleBackToEditListCallback(b, ctx, cbData)
 	case GTCallbackBackToEditGameList:
@@ -253,6 +275,7 @@ func parseGameTrackingCallback(data string) (GameTrackingCallbackData, error) {
 		"gt_list_playing:":       GTCallbackListPlaying,
 		"gt_stats_refresh:":      GTCallbackStatsRefresh,
 		"gt_stats_back:":         GTCallbackStatsBack,
+		"gt_inline_stats:":       GTCallbackInlineStats,
 		"gt_back_edit_list:":     GTCallbackBackToEditList,
 		"gt_back_edit_gamelist:": GTCallbackBackToEditGameList,
 		"gt_edit_list:":          GTCallbackEditGameList,
@@ -1570,6 +1593,49 @@ func HandleMyGameStatsCommand(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Conf
 	return err
 }
 
+// handleInlineStatsCallback handles the inline stats button press
+func handleInlineStatsCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrackingCallbackData) error {
+	db := steam.GetDatabase()
+	if db == nil {
+		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      "Database not available",
+			ShowAlert: true,
+		})
+		return nil
+	}
+
+	stats, err := db.GetUserGameStats(context.Background(), cbData.UserID)
+	if err != nil {
+		log.Printf("Error getting stats: %v", err)
+		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      "Error fetching stats",
+			ShowAlert: true,
+		})
+		return nil
+	}
+
+	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: ""})
+
+	if stats.TotalGames == 0 {
+		_, _, _ = b.EditMessageText(
+			"Your library is empty!\n\nUse /addgame to add games.",
+			&gotgbot.EditMessageTextOpts{
+				InlineMessageId: ctx.CallbackQuery.InlineMessageId,
+				ParseMode:       "HTML",
+			})
+		return nil
+	}
+
+	msg, keyboard := buildGameStatsMessage(stats, cbData.UserID, false)
+
+	_, _, err = b.EditMessageText(msg, &gotgbot.EditMessageTextOpts{
+		InlineMessageId: ctx.CallbackQuery.InlineMessageId,
+		ParseMode:       "HTML",
+		ReplyMarkup:     keyboard,
+	})
+	return err
+}
+
 // handleStatsRefreshCallback refreshes the stats by editing the existing message
 func handleStatsRefreshCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrackingCallbackData) error {
 	db := steam.GetDatabase()
@@ -1593,11 +1659,8 @@ func handleStatsRefreshCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTra
 
 	if stats.TotalGames == 0 {
 		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Refreshed"})
-		if ctx.CallbackQuery.Message != nil {
-			_, _, _ = ctx.CallbackQuery.Message.EditText(b,
-				"Your library is empty!\n\nUse /addgame to add games.",
-				&gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
-		}
+		_ = editMessageText(b, ctx, "Your library is empty!\n\nUse /addgame to add games.",
+			&gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
 		return nil
 	}
 
@@ -1605,13 +1668,10 @@ func handleStatsRefreshCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTra
 
 	msg, keyboard := buildGameStatsMessage(stats, cbData.UserID, true)
 
-	if ctx.CallbackQuery.Message != nil {
-		_, _, err = ctx.CallbackQuery.Message.EditText(b, msg, &gotgbot.EditMessageTextOpts{
-			ParseMode:   "HTML",
-			ReplyMarkup: keyboard,
-		})
-	}
-	return err
+	return editMessageText(b, ctx, msg, &gotgbot.EditMessageTextOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: keyboard,
+	})
 }
 
 // handleStatsBackCallback returns to the stats view from a list view
@@ -1638,23 +1698,17 @@ func handleStatsBackCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: ""})
 
 	if stats.TotalGames == 0 {
-		if ctx.CallbackQuery.Message != nil {
-			_, _, _ = ctx.CallbackQuery.Message.EditText(b,
-				"Your library is empty!\n\nUse /addgame to add games.",
-				&gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
-		}
+		_ = editMessageText(b, ctx, "Your library is empty!\n\nUse /addgame to add games.",
+			&gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
 		return nil
 	}
 
 	msg, keyboard := buildGameStatsMessage(stats, cbData.UserID, false)
 
-	if ctx.CallbackQuery.Message != nil {
-		_, _, err = ctx.CallbackQuery.Message.EditText(b, msg, &gotgbot.EditMessageTextOpts{
-			ParseMode:   "HTML",
-			ReplyMarkup: keyboard,
-		})
-	}
-	return err
+	return editMessageText(b, ctx, msg, &gotgbot.EditMessageTextOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: keyboard,
+	})
 }
 
 func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrackingCallbackData, status *steam.GameStatus, favoritesOnly bool) error {
@@ -1751,13 +1805,10 @@ func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{navRow},
 	}
 
-	if ctx.CallbackQuery.Message != nil {
-		_, _, err = ctx.CallbackQuery.Message.EditText(b, msg.String(), &gotgbot.EditMessageTextOpts{
-			ParseMode:   "HTML",
-			ReplyMarkup: keyboard,
-		})
-	}
-	return err
+	return editMessageText(b, ctx, msg.String(), &gotgbot.EditMessageTextOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: keyboard,
+	})
 }
 
 // getStatusSymbol returns a minimal symbol for game status
@@ -1846,13 +1897,10 @@ func handleListBacklogCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrac
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{navRow},
 	}
 
-	if ctx.CallbackQuery.Message != nil {
-		_, _, err = ctx.CallbackQuery.Message.EditText(b, msg.String(), &gotgbot.EditMessageTextOpts{
-			ParseMode:   "HTML",
-			ReplyMarkup: keyboard,
-		})
-	}
-	return err
+	return editMessageText(b, ctx, msg.String(), &gotgbot.EditMessageTextOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: keyboard,
+	})
 }
 
 // ========== /importsteam Command ==========

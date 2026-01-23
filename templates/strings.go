@@ -58,6 +58,13 @@ var InlineCommands = map[string]InlineCommand{
 		SwitchQuery:  ".mysteam ",
 		ThumbnailUrl: "https://i.ibb.co/x8hq8BHs/icons8-steam-64.png",
 	},
+	"mygamestats": {
+		Title:        "My Game Stats",
+		Description:  "View your gaming library stats",
+		Message:      "<b>My Game Stats</b>\n\nFetching your gaming stats...",
+		SwitchQuery:  ".mygamestats",
+		ThumbnailUrl: "https://i.ibb.co/j9vY5DJb/icons8-gamepad-100.png",
+	},
 }
 
 // GameTrackingHelp contains help text for game tracking commands

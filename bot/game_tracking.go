@@ -1531,8 +1531,8 @@ func buildGameStatsMessage(stats *steam.UserGameStats, userID int64, includeTime
 
 	msgStr := msg.String()
 	if includeTimestamp {
-		// Add invisible timestamp to force message update
-		msgStr += fmt.Sprintf("<code>​</code><!-- %d -->", time.Now().UnixNano())
+		// Add invisible zero-width spaces to force message update (varying count based on time)
+		msgStr += strings.Repeat("\u200B", int(time.Now().UnixNano()%5)+1)
 	}
 
 	return msgStr, keyboard

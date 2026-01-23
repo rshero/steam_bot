@@ -481,6 +481,9 @@ func buildInlineKeyboard(appID int, userID int64) *gotgbot.InlineKeyboardMarkup 
 				{Text: "Details", CallbackData: fmt.Sprintf("details:%d_%d", appID, userID)},
 				{Text: "Requirements", CallbackData: fmt.Sprintf("requirements:%d_%d", appID, userID)},
 			},
+			{
+				{Text: "+ Add to Library", CallbackData: fmt.Sprintf("gt_add:%d_%d", appID, userID)},
+			},
 		},
 	}
 }
@@ -517,7 +520,8 @@ func NewCallbackQueryHandler(cfg *config.Config) func(b *gotgbot.Bot, ctx *ext.C
 func HandleCallbackQuery(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config) error {
 	cbData, err := parseCallbackData(ctx.CallbackQuery.Data)
 	if err != nil || cbData.Type == CallbackUnknown {
-		return nil
+		// Not a callback we handle - try game tracking handler
+		return HandleGameTrackingCallback(b, ctx, cfg)
 	}
 
 	// Handle mysteam callback separately (doesn't need app details or user verification)

@@ -130,6 +130,7 @@ const (
 	GTCallbackImportPlayed
 	GTCallbackBackToEditList
 	GTCallbackBackToEditGameList
+	GTCallbackEditGameList
 )
 
 // GameTrackingCallbackData holds parsed callback info for game tracking
@@ -219,6 +220,8 @@ func HandleGameTrackingCallback(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Co
 		return handleBackToEditListCallback(b, ctx, cbData)
 	case GTCallbackBackToEditGameList:
 		return handleBackToEditGameListCallback(b, ctx, cbData)
+	case GTCallbackEditGameList:
+		return handleEditGameListCallback(b, ctx, cbData)
 	}
 
 	return nil
@@ -252,6 +255,7 @@ func parseGameTrackingCallback(data string) (GameTrackingCallbackData, error) {
 		"gt_stats_back:":         GTCallbackStatsBack,
 		"gt_back_edit_list:":     GTCallbackBackToEditList,
 		"gt_back_edit_gamelist:": GTCallbackBackToEditGameList,
+		"gt_edit_list:":          GTCallbackEditGameList,
 	}
 
 	var payload string
@@ -888,8 +892,9 @@ func HandleEditGameCommand(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config)
 		return fmt.Errorf("database not available")
 	}
 
-	// Get user's games (first 10)
-	games, err := db.GetUserGames(context.Background(), userID, nil, false, 10, 0)
+	// Get user's games (first page)
+	const pageSize = 8
+	games, err := db.GetUserGames(context.Background(), userID, nil, false, pageSize+1, 0)
 	if err != nil {
 		log.Printf("Error getting user games: %v", err)
 		_, err := ctx.EffectiveMessage.Reply(b,
@@ -905,10 +910,15 @@ func HandleEditGameCommand(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config)
 		return err
 	}
 
-	return sendEditGameList(b, ctx, games, userID)
+	hasNextPage := len(games) > pageSize
+	if hasNextPage {
+		games = games[:pageSize]
+	}
+
+	return sendEditGameList(b, ctx, games, userID, 0, hasNextPage)
 }
 
-func sendEditGameList(b *gotgbot.Bot, ctx *ext.Context, games []steam.UserGame, userID int64) error {
+func sendEditGameList(b *gotgbot.Bot, ctx *ext.Context, games []steam.UserGame, userID int64, page int, hasNextPage bool) error {
 	var msg strings.Builder
 	msg.WriteString("<b>Edit Game</b>\n\n")
 	msg.WriteString("Select a game to edit:\n\n")
@@ -918,13 +928,31 @@ func sendEditGameList(b *gotgbot.Bot, ctx *ext.Context, games []steam.UserGame, 
 	for _, game := range games {
 		statusSymbol := getStatusSymbol(game.Status)
 		gameText := fmt.Sprintf("%s %s", statusSymbol, game.GameName)
-		if len(gameText) > 50 {
-			gameText = gameText[:47] + "..."
+		if len(gameText) > 40 {
+			gameText = gameText[:37] + "..."
 		}
 
 		keyboard = append(keyboard, []gotgbot.InlineKeyboardButton{
 			{Text: gameText, CallbackData: fmt.Sprintf("gt_edit:%d_%d", game.ID, userID)},
 		})
+	}
+
+	// Add pagination row
+	var navRow []gotgbot.InlineKeyboardButton
+	if page > 0 {
+		navRow = append(navRow, gotgbot.InlineKeyboardButton{
+			Text:         "‹ Prev",
+			CallbackData: fmt.Sprintf("gt_edit_list:%d_%d", page-1, userID),
+		})
+	}
+	if hasNextPage {
+		navRow = append(navRow, gotgbot.InlineKeyboardButton{
+			Text:         "Next ›",
+			CallbackData: fmt.Sprintf("gt_edit_list:%d_%d", page+1, userID),
+		})
+	}
+	if len(navRow) > 0 {
+		keyboard = append(keyboard, navRow)
 	}
 
 	_, err := ctx.EffectiveMessage.Reply(b, msg.String(), &gotgbot.SendMessageOpts{
@@ -1365,10 +1393,17 @@ func handleBackToEditListCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameT
 	return sendGameEditOptions(b, ctx, game)
 }
 
-// handleBackToEditGameListCallback returns to the edit game list
+// handleBackToEditGameListCallback returns to the edit game list (page 0)
 func handleBackToEditGameListCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrackingCallbackData) error {
+	cbData.Page = 0
+	return handleEditGameListCallback(b, ctx, cbData)
+}
+
+// handleEditGameListCallback handles pagination for edit game list
+func handleEditGameListCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrackingCallbackData) error {
 	db := steam.GetDatabase()
-	games, err := db.GetUserGames(context.Background(), cbData.UserID, nil, false, 10, 0)
+	const pageSize = 8
+	games, err := db.GetUserGames(context.Background(), cbData.UserID, nil, false, pageSize+1, cbData.Page*pageSize)
 	if err != nil {
 		log.Printf("Error getting user games: %v", err)
 		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
@@ -1380,6 +1415,11 @@ func handleBackToEditGameListCallback(b *gotgbot.Bot, ctx *ext.Context, cbData G
 
 	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: ""})
 
+	hasNextPage := len(games) > pageSize
+	if hasNextPage {
+		games = games[:pageSize]
+	}
+
 	var msg strings.Builder
 	msg.WriteString("<b>Edit Game</b>\n\n")
 	msg.WriteString("Select a game to edit:\n\n")
@@ -1389,12 +1429,30 @@ func handleBackToEditGameListCallback(b *gotgbot.Bot, ctx *ext.Context, cbData G
 	for _, game := range games {
 		statusSymbol := getStatusSymbol(game.Status)
 		gameText := fmt.Sprintf("%s %s", statusSymbol, game.GameName)
-		if len(gameText) > 50 {
-			gameText = gameText[:47] + "..."
+		if len(gameText) > 40 {
+			gameText = gameText[:37] + "..."
 		}
 		keyboard = append(keyboard, []gotgbot.InlineKeyboardButton{
 			{Text: gameText, CallbackData: fmt.Sprintf("gt_edit:%d_%d", game.ID, game.UserID)},
 		})
+	}
+
+	// Add pagination row
+	var navRow []gotgbot.InlineKeyboardButton
+	if cbData.Page > 0 {
+		navRow = append(navRow, gotgbot.InlineKeyboardButton{
+			Text:         "‹ Prev",
+			CallbackData: fmt.Sprintf("gt_edit_list:%d_%d", cbData.Page-1, cbData.UserID),
+		})
+	}
+	if hasNextPage {
+		navRow = append(navRow, gotgbot.InlineKeyboardButton{
+			Text:         "Next ›",
+			CallbackData: fmt.Sprintf("gt_edit_list:%d_%d", cbData.Page+1, cbData.UserID),
+		})
+	}
+	if len(navRow) > 0 {
+		keyboard = append(keyboard, navRow)
 	}
 
 	if ctx.CallbackQuery.Message != nil {
@@ -1601,7 +1659,8 @@ func handleStatsBackCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 
 func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrackingCallbackData, status *steam.GameStatus, favoritesOnly bool) error {
 	db := steam.GetDatabase()
-	games, err := db.GetUserGames(context.Background(), cbData.UserID, status, favoritesOnly, 10, cbData.Page*10)
+	const pageSize = 10
+	games, err := db.GetUserGames(context.Background(), cbData.UserID, status, favoritesOnly, pageSize+1, cbData.Page*pageSize)
 	if err != nil {
 		log.Printf("Error getting games: %v", err)
 		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
@@ -1611,7 +1670,7 @@ func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 		return nil
 	}
 
-	if len(games) == 0 {
+	if len(games) == 0 && cbData.Page == 0 {
 		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "No games found"})
 		if ctx.CallbackQuery.Message != nil {
 			keyboard := gotgbot.InlineKeyboardMarkup{
@@ -1624,6 +1683,12 @@ func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 				&gotgbot.EditMessageTextOpts{ParseMode: "HTML", ReplyMarkup: keyboard})
 		}
 		return nil
+	}
+
+	// Check if there's a next page
+	hasNextPage := len(games) > pageSize
+	if hasNextPage {
+		games = games[:pageSize] // Trim to actual page size
 	}
 
 	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Loading..."})
@@ -1646,10 +1711,44 @@ func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 		msg.WriteString(fmt.Sprintf("%s %s · <code>%.1fh</code>%s\n", statusSymbol, game.GameName, game.TimePlayed, fav))
 	}
 
+	// Determine callback prefix for pagination
+	var callbackPrefix string
+	if favoritesOnly {
+		callbackPrefix = "gt_list_fav"
+	} else if status != nil {
+		switch *status {
+		case steam.StatusCompleted:
+			callbackPrefix = "gt_list_comp"
+		case steam.StatusPlaying:
+			callbackPrefix = "gt_list_playing"
+		default:
+			callbackPrefix = "gt_list_all"
+		}
+	} else {
+		callbackPrefix = "gt_list_all"
+	}
+
+	// Build pagination row
+	var navRow []gotgbot.InlineKeyboardButton
+	if cbData.Page > 0 {
+		navRow = append(navRow, gotgbot.InlineKeyboardButton{
+			Text:         "‹ Prev",
+			CallbackData: fmt.Sprintf("%s:%d_%d", callbackPrefix, cbData.Page-1, cbData.UserID),
+		})
+	}
+	navRow = append(navRow, gotgbot.InlineKeyboardButton{
+		Text:         "❮ Back",
+		CallbackData: fmt.Sprintf("gt_stats_back:_%d", cbData.UserID),
+	})
+	if hasNextPage {
+		navRow = append(navRow, gotgbot.InlineKeyboardButton{
+			Text:         "Next ›",
+			CallbackData: fmt.Sprintf("%s:%d_%d", callbackPrefix, cbData.Page+1, cbData.UserID),
+		})
+	}
+
 	keyboard := gotgbot.InlineKeyboardMarkup{
-		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "❮", CallbackData: fmt.Sprintf("gt_stats_back:_%d", cbData.UserID)}},
-		},
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{navRow},
 	}
 
 	if ctx.CallbackQuery.Message != nil {
@@ -1682,7 +1781,8 @@ func getStatusSymbol(s steam.GameStatus) string {
 
 func handleListBacklogCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrackingCallbackData) error {
 	db := steam.GetDatabase()
-	games, err := db.GetUserBacklogGames(context.Background(), cbData.UserID, 10, cbData.Page*10)
+	const pageSize = 10
+	games, err := db.GetUserBacklogGames(context.Background(), cbData.UserID, pageSize+1, cbData.Page*pageSize)
 	if err != nil {
 		log.Printf("Error getting backlog: %v", err)
 		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
@@ -1692,7 +1792,7 @@ func handleListBacklogCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrac
 		return nil
 	}
 
-	if len(games) == 0 {
+	if len(games) == 0 && cbData.Page == 0 {
 		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "No backlog games"})
 		if ctx.CallbackQuery.Message != nil {
 			keyboard := gotgbot.InlineKeyboardMarkup{
@@ -1707,6 +1807,12 @@ func handleListBacklogCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrac
 		return nil
 	}
 
+	// Check if there's a next page
+	hasNextPage := len(games) > pageSize
+	if hasNextPage {
+		games = games[:pageSize]
+	}
+
 	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Loading..."})
 
 	var msg strings.Builder
@@ -1717,10 +1823,27 @@ func handleListBacklogCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrac
 		msg.WriteString(fmt.Sprintf("%s %s\n", statusSymbol, game.GameName))
 	}
 
+	// Build pagination row
+	var navRow []gotgbot.InlineKeyboardButton
+	if cbData.Page > 0 {
+		navRow = append(navRow, gotgbot.InlineKeyboardButton{
+			Text:         "‹ Prev",
+			CallbackData: fmt.Sprintf("gt_list_backlog:%d_%d", cbData.Page-1, cbData.UserID),
+		})
+	}
+	navRow = append(navRow, gotgbot.InlineKeyboardButton{
+		Text:         "❮ Back",
+		CallbackData: fmt.Sprintf("gt_stats_back:_%d", cbData.UserID),
+	})
+	if hasNextPage {
+		navRow = append(navRow, gotgbot.InlineKeyboardButton{
+			Text:         "Next ›",
+			CallbackData: fmt.Sprintf("gt_list_backlog:%d_%d", cbData.Page+1, cbData.UserID),
+		})
+	}
+
 	keyboard := gotgbot.InlineKeyboardMarkup{
-		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "❮", CallbackData: fmt.Sprintf("gt_stats_back:_%d", cbData.UserID)}},
-		},
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{navRow},
 	}
 
 	if ctx.CallbackQuery.Message != nil {

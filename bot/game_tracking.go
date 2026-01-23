@@ -1737,7 +1737,7 @@ func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 		})
 	}
 	navRow = append(navRow, gotgbot.InlineKeyboardButton{
-		Text:         "❮ Back",
+		Text:         "❮",
 		CallbackData: fmt.Sprintf("gt_stats_back:_%d", cbData.UserID),
 	})
 	if hasNextPage {
@@ -1832,7 +1832,7 @@ func handleListBacklogCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrac
 		})
 	}
 	navRow = append(navRow, gotgbot.InlineKeyboardButton{
-		Text:         "❮ Back",
+		Text:         "❮",
 		CallbackData: fmt.Sprintf("gt_stats_back:_%d", cbData.UserID),
 	})
 	if hasNextPage {

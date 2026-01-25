@@ -2127,94 +2127,114 @@ func handleImportPlayedCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTra
 
 func performSteamImport(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrackingCallbackData, cfg *config.Config, playedOnly bool) error {
 	steamID := strconv.FormatInt(cbData.GameID, 10) // GameID field holds Steam ID for import callbacks
-	// Fetch owned games
-	gamesResp, err := steam.GetSteamOwnedGames(cfg.SteamAPIKey, steamID)
-	if err != nil {
-		_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "Error fetching library",
-			ShowAlert: true,
-		})
-		return nil
+
+	// Answer callback and update message immediately
+	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Starting import..."})
+
+	importType := "all games"
+	if playedOnly {
+		importType = "played games"
 	}
 
-	_, _ = ctx.CallbackQuery.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Importing..."})
-
-	db := steam.GetDatabase()
-	if db == nil {
-		if ctx.CallbackQuery.Message != nil {
-			_, _, _ = ctx.CallbackQuery.Message.EditText(b,
-				"Database not available.",
-				&gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
-		}
-		return nil
+	// Edit message to show import is in progress (removes buttons to prevent double-clicks)
+	if ctx.CallbackQuery.Message != nil {
+		_, _, _ = ctx.CallbackQuery.Message.EditText(b,
+			fmt.Sprintf("Importing %s in background...\nThis may take a while depending on your library size.", importType),
+			&gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
 	}
 
-	games := make([]steam.UserGame, 0)
-	for _, ownedGame := range gamesResp.Response.Games {
-		playTimeHours := float64(ownedGame.PlaytimeForever) / 60.0
-
-		// Skip unplayed games if playedOnly filter is enabled
-		if playedOnly && playTimeHours == 0 {
-			continue
-		}
-
-		appIDStr := strconv.Itoa(ownedGame.AppID)
-
-		// Determine status based on playtime
-		var status steam.GameStatus
-		if playTimeHours == 0 {
-			status = steam.StatusNotStarted
-		} else {
-			// Try to get HLTB data to determine if completed
-			hltbData, _ := steam.GetHltbData(context.Background(), appIDStr, ownedGame.Name)
-			if hltbData.MainStory > 0 && playTimeHours >= float64(hltbData.MainStory) {
-				status = steam.StatusCompleted
-			} else {
-				status = steam.StatusPlaying
-			}
-		}
-
-		game := steam.UserGame{
-			UserID:      cbData.UserID,
-			AppID:       sql.NullString{String: appIDStr, Valid: true},
-			GameName:    ownedGame.Name,
-			Status:      status,
-			TimePlayed:  playTimeHours,
-			IsFavorite:  false,
-			IsSteamGame: true,
-		}
-
-		games = append(games, game)
-
-		// Process in batches to avoid overwhelming the system
-		if len(games) >= 50 {
-			inserted, _ := db.BulkAddUserGames(context.Background(), games)
+	// Run import in background
+	go func() {
+		// Fetch owned games
+		gamesResp, err := steam.GetSteamOwnedGames(cfg.SteamAPIKey, steamID)
+		if err != nil {
 			if ctx.CallbackQuery.Message != nil {
 				_, _, _ = ctx.CallbackQuery.Message.EditText(b,
-					fmt.Sprintf("Importing... %d games added so far", inserted),
+					"Error fetching Steam library. Please try again later.",
 					&gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
 			}
-			games = make([]steam.UserGame, 0)
+			return
 		}
-	}
 
-	// Insert remaining games
-	totalInserted := 0
-	if len(games) > 0 {
-		inserted, _ := db.BulkAddUserGames(context.Background(), games)
-		totalInserted = inserted
-	}
+		db := steam.GetDatabase()
+		if db == nil {
+			if ctx.CallbackQuery.Message != nil {
+				_, _, _ = ctx.CallbackQuery.Message.EditText(b,
+					"Database not available.",
+					&gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
+			}
+			return
+		}
 
-	msg := fmt.Sprintf(
-		"<b>Import Complete!</b>\n\n"+
-			"Added %d games to your library.\n\n"+
-			"Use /mygamestats to view your library!",
-		totalInserted,
-	)
+		games := make([]steam.UserGame, 0)
+		totalProcessed := 0
+		for _, ownedGame := range gamesResp.Response.Games {
+			playTimeHours := float64(ownedGame.PlaytimeForever) / 60.0
 
-	if ctx.CallbackQuery.Message != nil {
-		_, _, _ = ctx.CallbackQuery.Message.EditText(b, msg, &gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
-	}
+			// Skip unplayed games if playedOnly filter is enabled
+			if playedOnly && playTimeHours == 0 {
+				continue
+			}
+
+			appIDStr := strconv.Itoa(ownedGame.AppID)
+
+			// Determine status based on playtime
+			var status steam.GameStatus
+			if playTimeHours == 0 {
+				status = steam.StatusNotStarted
+			} else {
+				// Try to get HLTB data to determine if completed
+				hltbData, _ := steam.GetHltbData(context.Background(), appIDStr, ownedGame.Name)
+				if hltbData.MainStory > 0 && playTimeHours >= float64(hltbData.MainStory) {
+					status = steam.StatusCompleted
+				} else {
+					status = steam.StatusPlaying
+				}
+			}
+
+			game := steam.UserGame{
+				UserID:      cbData.UserID,
+				AppID:       sql.NullString{String: appIDStr, Valid: true},
+				GameName:    ownedGame.Name,
+				Status:      status,
+				TimePlayed:  playTimeHours,
+				IsFavorite:  false,
+				IsSteamGame: true,
+			}
+
+			games = append(games, game)
+
+			// Process in batches to avoid overwhelming the system
+			if len(games) >= 50 {
+				inserted, _ := db.BulkAddUserGames(context.Background(), games)
+				totalProcessed += inserted
+				if ctx.CallbackQuery.Message != nil {
+					_, _, _ = ctx.CallbackQuery.Message.EditText(b,
+						fmt.Sprintf("Importing %s in background...\n%d games added so far.", importType, totalProcessed),
+						&gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
+				}
+				games = make([]steam.UserGame, 0)
+			}
+		}
+
+		// Insert remaining games
+		if len(games) > 0 {
+			inserted, _ := db.BulkAddUserGames(context.Background(), games)
+			totalProcessed += inserted
+		}
+
+		msg := fmt.Sprintf(
+			"<b>Import Complete!</b>\n\n"+
+				"Added %d games to your library.\n\n"+
+				"Use /mygamestats to view your library!",
+			totalProcessed,
+		)
+
+		if ctx.CallbackQuery.Message != nil {
+			_, _, _ = ctx.CallbackQuery.Message.EditText(b, msg, &gotgbot.EditMessageTextOpts{ParseMode: "HTML"})
+		}
+	}()
+
 	return nil
 }
 

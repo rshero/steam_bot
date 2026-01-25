@@ -70,7 +70,6 @@ func (d *Database) createTables(ctx context.Context) error {
 			expires_at INTEGER
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_hltb_appid ON hltb_cache(app_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_hltb_expires ON hltb_cache(expires_at)`,
 
 		`CREATE TABLE IF NOT EXISTS requirements_cache (
 			app_id TEXT PRIMARY KEY,
@@ -160,7 +159,6 @@ func (d *Database) CleanupExpired(ctx context.Context) error {
 
 	tables := []string{
 		"DELETE FROM profile_cards_cache WHERE expires_at < ?",
-		"DELETE FROM hltb_cache WHERE expires_at < ?",
 		"DELETE FROM requirements_cache WHERE expires_at < ?",
 		"DELETE FROM reviews_cache WHERE expires_at < ?",
 	}
@@ -282,9 +280,9 @@ type HLTBCache struct {
 func (d *Database) GetHLTB(ctx context.Context, appID string) (*HLTBCache, error) {
 	query := `SELECT app_id, game_name, main_story, main_extra, completionist,
 			  platforms, cached_at, expires_at
-			  FROM hltb_cache WHERE app_id = ? AND expires_at > ?`
+			  FROM hltb_cache WHERE app_id = ?`
 
-	row := d.db.QueryRowContext(ctx, query, appID, time.Now().Unix())
+	row := d.db.QueryRowContext(ctx, query, appID)
 
 	var cache HLTBCache
 	var platformsJSON string
@@ -308,18 +306,17 @@ func (d *Database) GetHLTB(ctx context.Context, appID string) (*HLTBCache, error
 	return &cache, nil
 }
 
-func (d *Database) SetHLTB(ctx context.Context, appID, gameName string, mainStory, mainExtra, completionist float64, platforms []string, ttl time.Duration) error {
+func (d *Database) SetHLTB(ctx context.Context, appID, gameName string, mainStory, mainExtra, completionist float64, platforms []string) error {
 	now := time.Now()
-	expiresAt := now.Add(ttl).Unix()
 	cachedAt := now.Unix()
 
 	platformsJSON, _ := json.Marshal(platforms)
 
 	query := `INSERT OR REPLACE INTO hltb_cache
 			  (app_id, game_name, main_story, main_extra, completionist, platforms, cached_at, expires_at)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+			  VALUES (?, ?, ?, ?, ?, ?, ?, 0)`
 
-	_, err := d.db.ExecContext(ctx, query, appID, gameName, mainStory, mainExtra, completionist, platformsJSON, cachedAt, expiresAt)
+	_, err := d.db.ExecContext(ctx, query, appID, gameName, mainStory, mainExtra, completionist, platformsJSON, cachedAt)
 	return err
 }
 

@@ -587,7 +587,7 @@ func GetHltbData(ctx context.Context, appID string, searchTerm string) (*hltb.Ga
 	}
 
 	if db != nil {
-		err = db.SetHLTB(ctx, appID, searchTerm, float64(game.MainStory), float64(game.MainPlusExtra), float64(game.Completionist), game.Platforms, 30*24*time.Hour)
+		err = db.SetHLTB(ctx, appID, searchTerm, float64(game.MainStory), float64(game.MainPlusExtra), float64(game.Completionist), game.Platforms)
 		if err != nil {
 			log.Printf("[DB] Error caching HLTB data for appID %s: %v", appID, err)
 		} else {

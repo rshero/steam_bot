@@ -43,11 +43,19 @@ func editMessageText(b *gotgbot.Bot, ctx *ext.Context, text string, opts *gotgbo
 		}
 		opts.InlineMessageId = ctx.CallbackQuery.InlineMessageId
 		_, _, err := b.EditMessageText(text, opts)
+		// Ignore "message is not modified" error
+		if err != nil && strings.Contains(err.Error(), "message is not modified") {
+			return nil
+		}
 		return err
 	}
 	// Regular message
 	if ctx.CallbackQuery.Message != nil {
 		_, _, err := ctx.CallbackQuery.Message.EditText(b, text, opts)
+		// Ignore "message is not modified" error
+		if err != nil && strings.Contains(err.Error(), "message is not modified") {
+			return nil
+		}
 		return err
 	}
 	return nil
@@ -320,7 +328,9 @@ func parseGameTrackingCallback(data string) (GameTrackingCallbackData, error) {
 			if len(parts) > 1 {
 				result.UserID, _ = strconv.ParseInt(parts[1], 10, 64)
 			}
-		case GTCallbackEditGameList, GTCallbackBackToEditGameList:
+		case GTCallbackEditGameList, GTCallbackBackToEditGameList,
+			GTCallbackListGames, GTCallbackListFavorites, GTCallbackListCompleted,
+			GTCallbackListBacklog, GTCallbackListPlaying:
 			// Format: PAGE_USERID
 			result.Page, _ = strconv.Atoi(parts[0])
 			if len(parts) > 1 {
@@ -1815,10 +1825,6 @@ func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 			CallbackData: fmt.Sprintf("%s:%d_%d", callbackPrefix, cbData.Page-1, cbData.UserID),
 		})
 	}
-	navRow = append(navRow, gotgbot.InlineKeyboardButton{
-		Text:         "❮",
-		CallbackData: fmt.Sprintf("gt_stats_back:_%d", cbData.UserID),
-	})
 	if hasNextPage {
 		navRow = append(navRow, gotgbot.InlineKeyboardButton{
 			Text:         "❯",
@@ -1826,8 +1832,17 @@ func handleListGamesCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTracki
 		})
 	}
 
+	// Build keyboard with pagination row (if any) and stats menu button
+	var rows [][]gotgbot.InlineKeyboardButton
+	if len(navRow) > 0 {
+		rows = append(rows, navRow)
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "Stats Menu", CallbackData: fmt.Sprintf("gt_stats_back:_%d", cbData.UserID)},
+	})
+
 	keyboard := gotgbot.InlineKeyboardMarkup{
-		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{navRow},
+		InlineKeyboard: rows,
 	}
 
 	return editMessageText(b, ctx, msg.String(), &gotgbot.EditMessageTextOpts{
@@ -1996,7 +2011,7 @@ func HandleImportSteamCommand(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Conf
 				{Text: "Import All", CallbackData: fmt.Sprintf("gt_import_all:%s_%d", steamID, ctx.EffectiveMessage.From.Id)},
 			},
 			{
-				{Text: "▶ Import Played Only", CallbackData: fmt.Sprintf("gt_import_played:%s_%d", steamID, ctx.EffectiveMessage.From.Id)},
+				{Text: "▸ Import Played Only", CallbackData: fmt.Sprintf("gt_import_played:%s_%d", steamID, ctx.EffectiveMessage.From.Id)},
 			},
 		},
 	}
@@ -2111,8 +2126,7 @@ func handleImportPlayedCallback(b *gotgbot.Bot, ctx *ext.Context, cbData GameTra
 }
 
 func performSteamImport(b *gotgbot.Bot, ctx *ext.Context, cbData GameTrackingCallbackData, cfg *config.Config, playedOnly bool) error {
-	steamID := cbData.AppID // AppID field holds Steam ID for import callbacks
-
+	steamID := strconv.FormatInt(cbData.GameID, 10) // GameID field holds Steam ID for import callbacks
 	// Fetch owned games
 	gamesResp, err := steam.GetSteamOwnedGames(cfg.SteamAPIKey, steamID)
 	if err != nil {

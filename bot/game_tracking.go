@@ -951,9 +951,41 @@ func HandleEditGameCommand(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config)
 		return fmt.Errorf("database not available")
 	}
 
-	// Get user's games (first page)
+	// Check for search query argument
+	query := extractCommandArgs(ctx.EffectiveMessage.Text, "editgame")
 	const pageSize = 8
-	games, err := db.GetUserGames(context.Background(), userID, nil, false, pageSize+1, 0)
+
+	var games []steam.UserGame
+	var err error
+
+	if query != "" {
+		// Search user's games by name
+		games, err = db.SearchUserGames(context.Background(), userID, query, pageSize+1)
+		if err != nil {
+			log.Printf("Error searching user games: %v", err)
+			_, err := ctx.EffectiveMessage.Reply(b,
+				"Error searching your library. Please try again.",
+				&gotgbot.SendMessageOpts{ParseMode: "HTML"})
+			return err
+		}
+
+		if len(games) == 0 {
+			_, err := ctx.EffectiveMessage.Reply(b,
+				fmt.Sprintf("No games found matching <b>\"%s\"</b> in your library.", query),
+				&gotgbot.SendMessageOpts{ParseMode: "HTML"})
+			return err
+		}
+
+		hasNextPage := len(games) > pageSize
+		if hasNextPage {
+			games = games[:pageSize]
+		}
+
+		return sendEditGameSearchResults(b, ctx, games, userID, query, hasNextPage)
+	}
+
+	// No query - show paginated list
+	games, err = db.GetUserGames(context.Background(), userID, nil, false, pageSize+1, 0)
 	if err != nil {
 		log.Printf("Error getting user games: %v", err)
 		_, err := ctx.EffectiveMessage.Reply(b,
@@ -975,6 +1007,36 @@ func HandleEditGameCommand(b *gotgbot.Bot, ctx *ext.Context, cfg *config.Config)
 	}
 
 	return sendEditGameList(b, ctx, games, userID, 0, hasNextPage)
+}
+
+func sendEditGameSearchResults(b *gotgbot.Bot, ctx *ext.Context, games []steam.UserGame, userID int64, query string, hasMore bool) error {
+	var msg strings.Builder
+	msg.WriteString("<b>Edit Game</b>\n\n")
+	fmt.Fprintf(&msg, "Search results for <b>\"%s\"</b>:\n", query)
+	if hasMore {
+		msg.WriteString("<i>(Showing first 8 matches)</i>\n")
+	}
+	msg.WriteString("\n")
+
+	keyboard := make([][]gotgbot.InlineKeyboardButton, 0)
+
+	for _, game := range games {
+		statusSymbol := getStatusSymbol(game.Status)
+		gameText := fmt.Sprintf("%s %s", statusSymbol, game.GameName)
+		if len(gameText) > 40 {
+			gameText = gameText[:37] + "..."
+		}
+
+		keyboard = append(keyboard, []gotgbot.InlineKeyboardButton{
+			{Text: gameText, CallbackData: fmt.Sprintf("gt_edit:%d_%d", game.ID, userID)},
+		})
+	}
+
+	_, err := ctx.EffectiveMessage.Reply(b, msg.String(), &gotgbot.SendMessageOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: keyboard},
+	})
+	return err
 }
 
 func sendEditGameList(b *gotgbot.Bot, ctx *ext.Context, games []steam.UserGame, userID int64, page int, hasNextPage bool) error {

@@ -759,9 +759,14 @@ func handleMySteamCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData
 	}
 
 	// Build image generation options with "-" for account value initially
+	// Truncate display name if it exceeds 8 characters
+	displayName := userInfo.Summary.PersonaName
+	if len([]rune(displayName)) > 8 {
+		displayName = string([]rune(displayName)[:8])
+	}
 	opts := images.ProfileCardOptions{
 		AvatarURL:    userInfo.Summary.Avatar,
-		Username:     userInfo.Summary.PersonaName,
+		Username:     displayName,
 		Level:        userInfo.Level,
 		CountryCode:  userInfo.Summary.CountryCode,
 		GameCount:    userInfo.GameCount,

@@ -14,6 +14,7 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+// lots of figma comments cause it was first designed in figma then ported back here
 const (
 	// Card dimensions from Figma (985×554)
 	CardWidth  = 985
@@ -50,11 +51,11 @@ const (
 	// Text positions from Figma
 	UsernameX    = 103 // Figma: -444 + 547
 	UsernameY    = 499 // Figma: 195 + 284
-	LevelTextX   = 261 // Figma: -286 + 547
+	LevelTextX   = 270 // Figma: -286 + 547 + 4
 	LevelTextY   = 414 // Figma: 130 + 284
-	ProgressBarX = 261 // Figma: -286 + 547
+	ProgressBarX = 270 // Figma: -286 + 547 + 4
 	ProgressBarY = 463 // Figma: 189 + 284
-	GamesPlayedX = 261 // Figma: -286 + 547
+	GamesPlayedX = 270 // Figma: -286 + 547 + 4
 	GamesPlayedY = 480 // Figma: 196 + 284
 	HoursValueX  = 680 // Figma: 133 + 547
 	HoursValueY  = 414 // Figma: 130 + 284

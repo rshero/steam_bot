@@ -321,7 +321,10 @@ func parseGameTrackingCallback(data string) (GameTrackingCallbackData, error) {
 	// Parse payload based on type
 	parts := strings.Split(payload, "_")
 
-	if len(parts) > 0 && parts[0] != "" {
+	// Handle callbacks with format "_USERID" (empty first part)
+	if len(parts) > 1 && parts[0] == "" {
+		result.UserID, _ = strconv.ParseInt(parts[1], 10, 64)
+	} else if len(parts) > 0 && parts[0] != "" {
 		switch result.Type {
 		case GTCallbackAddGame, GTCallbackAddCustomGame:
 			result.AppID = parts[0]

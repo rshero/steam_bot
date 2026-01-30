@@ -637,24 +637,25 @@ func handleBackCallback(b *gotgbot.Bot, ctx *ext.Context, cbData CallbackData) e
 		}
 	}
 
-	// Get app info for pricing
+	// Get app info for INR pricing
 	appInfo, _ := steam.GetSteamAppInfo(cbData.AppID)
+
+	// Fetch USD price using US region
+	var usPriceStr string
+	if usDetails, err := steam.FetchSteamAppDetails(cbData.AppID, "US"); err == nil {
+		usPriceStr = usDetails.FormattedPrice()
+	} else {
+		// Fallback to INR if USD fetch fails
+		usPriceStr = appInfo.Price
+	}
 
 	// Parse appID to int for URL generation
 	appIDInt, _ := strconv.Atoi(cbData.AppID)
 
-	// Format price display
-	var priceDisplay string
-	if appInfo.Price != "" {
-		priceDisplay = appInfo.Price
-	} else {
-		priceDisplay = "Free"
-	}
-
 	// Reconstruct the original search result message
 	msg := templates.FormatDealMessage(
 		details.Name,
-		priceDisplay,
+		usPriceStr,
 		"",
 		appInfo.Price,
 		"",

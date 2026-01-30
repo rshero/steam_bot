@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"net/url"
 	"steam_bot/utils"
 	"strings"
@@ -341,13 +342,17 @@ func GetCheapSharkDeals() ([]CheapSharkDeal, error) {
 // GetFullSteamAppDetails fetches complete app details from Steam API with caching
 func GetFullSteamAppDetails(appID string) (*SteamAppDetails, error) {
 	return appDetailsCache.GetOrFetch(appID, func() (*SteamAppDetails, error) {
-		return fetchSteamAppDetails(appID)
+		return FetchSteamAppDetails(appID, "")
 	})
 }
 
-// fetchSteamAppDetails performs the actual API call (internal, uncached)
-func fetchSteamAppDetails(appID string) (*SteamAppDetails, error) {
-	apiURL := fmt.Sprintf("https://store.steampowered.com/api/appdetails?appids=%s&cc=in", appID)
+// FetchSteamAppDetails performs the actual API call (uncached)
+// cc is the country code for pricing (e.g., "US", "in"). Defaults to "in" if empty.
+func FetchSteamAppDetails(appID string, cc string) (*SteamAppDetails, error) {
+	if cc == "" {
+		cc = "in"
+	}
+	apiURL := fmt.Sprintf("https://store.steampowered.com/api/appdetails?appids=%s&cc=%s", appID, cc)
 
 	var response map[string]SteamAppDetailsResponse
 	if err := utils.HttpGetJSON(apiURL, &response); err != nil {
@@ -412,10 +417,7 @@ func FetchBatchPriceOverview(appIds []int, countryCode string) (map[string]Price
 	semaphore := make(chan struct{}, 3)
 
 	for i := 0; i < len(appIds); i += batchSize {
-		end := i + batchSize
-		if end > len(appIds) {
-			end = len(appIds)
-		}
+		end := min(i+batchSize, len(appIds))
 		batch := appIds[i:end]
 
 		go func(batchAppIds []int) {
@@ -480,16 +482,14 @@ func FetchBatchPriceOverview(appIds []int, countryCode string) (map[string]Price
 	}
 
 	// Collect results from all batches
-	for i := 0; i < numBatches; i++ {
+	for range numBatches {
 		result := <-results
 		if result.err != nil {
 			log.Printf("Error fetching batch: %v", result.err)
 			continue
 		}
 
-		for appID, overview := range result.prices {
-			priceOverviews[appID] = overview
-		}
+		maps.Copy(priceOverviews, result.prices)
 		for appID := range result.found {
 			foundAppIds[appID] = true
 		}

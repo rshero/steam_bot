@@ -146,15 +146,18 @@ func (d *SteamAppDetails) FormattedPrice() string {
 	price := d.PriceOverview.FinalFormatted
 	releaseDate := d.ReleaseDate.Date
 
+	// Price takes priority if available
+	if price != "" {
+		return strings.ReplaceAll(price, " ", "")
+	}
+
 	switch {
-	case price == "" && releaseDate == "":
-		return "N/A"
 	case releaseDate == "To be announced" || releaseDate == "Coming soon":
 		return releaseDate
 	case d.ReleaseDate.ComingSoon:
 		return "Coming soon"
 	default:
-		return strings.ReplaceAll(price, " ", "")
+		return "N/A"
 	}
 }
 

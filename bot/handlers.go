@@ -1109,10 +1109,16 @@ func parseCallbackData(data string) (CallbackData, error) {
 	// Special handling for mysteam callbacks
 	if result.Type == CallbackMySteam || result.Type == CallbackMySteamRefresh {
 		// For mysteam callbacks, payload format is "username_userID" or just "username"
-		parts := strings.Split(payload, "_")
-		result.AppID = parts[0] // Username goes in AppID field
-		if len(parts) == 2 {
-			userID, err := strconv.ParseInt(parts[1], 10, 64)
+		// Split on the last underscore to handle usernames with underscores
+		lastUnderscoreIdx := strings.LastIndex(payload, "_")
+		if lastUnderscoreIdx == -1 {
+			// No underscore found, just username
+			result.AppID = payload
+		} else {
+			// Split into username and userID
+			result.AppID = payload[:lastUnderscoreIdx] // Username goes in AppID field
+			userIDStr := payload[lastUnderscoreIdx+1:]
+			userID, err := strconv.ParseInt(userIDStr, 10, 64)
 			if err == nil {
 				result.UserID = userID
 			}

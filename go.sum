@@ -14,6 +14,8 @@ github.com/mattn/go-sqlite3 v1.14.33 h1:A5blZ5ulQo2AtayQ9/limgHEkFreKj1Dv226a1K7
 github.com/mattn/go-sqlite3 v1.14.33/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
 github.com/rshero/hltb v0.0.0-20251202074929-d4f20021b803 h1:MQSvDzn3hXkCJMmFGnp9WpNslEgCjtohiOSBDsXyiqE=
 github.com/rshero/hltb v0.0.0-20251202074929-d4f20021b803/go.mod h1:wN45yUDZ8vLZuPtWNsbrvILPBKH5V6iw/xyErU/PJoU=
+github.com/rshero/hltb v0.0.0-20260307090341-10a6c16ab85b h1:dRPHzYt/t636vLoN/HDDcXdsE3i9VKG1eq5rQ91ivoY=
+github.com/rshero/hltb v0.0.0-20260307090341-10a6c16ab85b/go.mod h1:wN45yUDZ8vLZuPtWNsbrvILPBKH5V6iw/xyErU/PJoU=
 golang.org/x/image v0.30.0 h1:jD5RhkmVAnjqaCUXfbGBrn3lpxbknfN9w2UhHHU+5B4=
 golang.org/x/image v0.30.0/go.mod h1:SAEUTxCCMWSrJcCy/4HwavEsfZZJlYxeHLc6tTiAe/c=
 golang.org/x/text v0.28.0 h1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng=

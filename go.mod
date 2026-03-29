@@ -11,7 +11,7 @@ require (
 	github.com/GrandpaEJ/advancegg v1.1.0
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	github.com/mattn/go-sqlite3 v1.14.33
-	github.com/rshero/hltb v0.0.0-20251202074929-d4f20021b803
+	github.com/rshero/hltb v0.0.0-20260307090341-10a6c16ab85b
 	golang.org/x/image v0.30.0
 )
 

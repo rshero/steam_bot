@@ -18,7 +18,7 @@ var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 func HttpGetJSON(url string, target interface{}) error {
 	headers := map[string]string{
-		"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+		"User-Agent": "steam_bot (https://github.com/rshero/steam_bot)",
 	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {

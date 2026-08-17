@@ -17,7 +17,17 @@ import (
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 func HttpGetJSON(url string, target interface{}) error {
-	resp, err := httpClient.Get(url)
+	headers := map[string]string{
+		"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+	}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request for URL %s: %w", url, err)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to fetch URL %s: %w", url, err)
 	}

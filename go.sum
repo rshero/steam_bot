@@ -16,6 +16,8 @@ github.com/rshero/hltb v0.0.0-20260307090341-10a6c16ab85b h1:dRPHzYt/t636vLoN/HD
 github.com/rshero/hltb v0.0.0-20260307090341-10a6c16ab85b/go.mod h1:wN45yUDZ8vLZuPtWNsbrvILPBKH5V6iw/xyErU/PJoU=
 github.com/rshero/hltb v0.0.0-20260413080653-0133c8f9a655 h1:7NVE9eM+4eRCDJ9VHpKTDAiTuxIa0flHPnrboeMIyog=
 github.com/rshero/hltb v0.0.0-20260413080653-0133c8f9a655/go.mod h1:wN45yUDZ8vLZuPtWNsbrvILPBKH5V6iw/xyErU/PJoU=
+github.com/rshero/hltb v0.0.0-20260908054846-07400ebe41e8 h1:vgUyzjGl5FPCLBw9lvAiPKDYgTQw1VTU+Ko+5ebbptc=
+github.com/rshero/hltb v0.0.0-20260908054846-07400ebe41e8/go.mod h1:wN45yUDZ8vLZuPtWNsbrvILPBKH5V6iw/xyErU/PJoU=
 golang.org/x/image v0.30.0 h1:jD5RhkmVAnjqaCUXfbGBrn3lpxbknfN9w2UhHHU+5B4=
 golang.org/x/image v0.30.0/go.mod h1:SAEUTxCCMWSrJcCy/4HwavEsfZZJlYxeHLc6tTiAe/c=
 golang.org/x/text v0.28.0 h1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng=

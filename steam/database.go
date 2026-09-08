@@ -66,8 +66,7 @@ func (d *Database) createTables(ctx context.Context) error {
 			main_extra REAL,
 			completionist REAL,
 			platforms TEXT,
-			cached_at INTEGER,
-			expires_at INTEGER
+			cached_at INTEGER
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_hltb_appid ON hltb_cache(app_id)`,
 
@@ -274,12 +273,11 @@ type HLTBCache struct {
 	Completionist float64
 	Platforms     []string
 	CachedAt      int64
-	ExpiresAt     int64
 }
 
 func (d *Database) GetHLTB(ctx context.Context, appID string) (*HLTBCache, error) {
 	query := `SELECT app_id, game_name, main_story, main_extra, completionist,
-			  platforms, cached_at, expires_at
+			  platforms, cached_at
 			  FROM hltb_cache WHERE app_id = ?`
 
 	row := d.db.QueryRowContext(ctx, query, appID)
@@ -290,7 +288,7 @@ func (d *Database) GetHLTB(ctx context.Context, appID string) (*HLTBCache, error
 	err := row.Scan(
 		&cache.AppID, &cache.GameName, &cache.MainStory,
 		&cache.MainExtra, &cache.Completionist, &platformsJSON,
-		&cache.CachedAt, &cache.ExpiresAt,
+		&cache.CachedAt,
 	)
 
 	if err != nil {
@@ -313,8 +311,8 @@ func (d *Database) SetHLTB(ctx context.Context, appID, gameName string, mainStor
 	platformsJSON, _ := json.Marshal(platforms)
 
 	query := `INSERT OR REPLACE INTO hltb_cache
-			  (app_id, game_name, main_story, main_extra, completionist, platforms, cached_at, expires_at)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, 0)`
+			  (app_id, game_name, main_story, main_extra, completionist, platforms, cached_at)
+			  VALUES (?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := d.db.ExecContext(ctx, query, appID, gameName, mainStory, mainExtra, completionist, platformsJSON, cachedAt)
 	return err

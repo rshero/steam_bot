@@ -10,7 +10,7 @@ require (
 require (
 	github.com/GrandpaEJ/advancegg v1.1.0
 	github.com/mattn/go-sqlite3 v1.14.33
-	github.com/rshero/hltb v0.0.0-20260413080653-0133c8f9a655
+	github.com/rshero/hltb v0.0.0-20260908054846-07400ebe41e8
 	golang.org/x/image v0.30.0
 )
 

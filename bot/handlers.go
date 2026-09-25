@@ -344,7 +344,7 @@ func showAllInlineCommands(b *gotgbot.Bot, ctx *ext.Context) error {
 				Description:  cmd.Description,
 				ThumbnailUrl: cmd.ThumbnailUrl,
 				InputMessageContent: gotgbot.InputTextMessageContent{
-					MessageText: "<b>My Gaming Stats</b>\n\nClick the button below to load your stats.",
+					MessageText: "<b>My Game Stats</b>\n\nClick the button below to load your stats.",
 					ParseMode:   "HTML",
 				},
 				ReplyMarkup: &gotgbot.InlineKeyboardMarkup{

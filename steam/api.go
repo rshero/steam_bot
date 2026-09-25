@@ -104,6 +104,7 @@ type PcRequirements struct {
 
 type SteamAppDetails struct {
 	Name             string          `json:"name"`
+	SteamAppID       int             `json:"steam_appid"`
 	AppType          string          `json:"type"`
 	ShortDescription string          `json:"short_description"`
 	IsFree           bool            `json:"is_free"`
@@ -362,12 +363,30 @@ func FetchSteamAppDetails(appID string, cc string) (*SteamAppDetails, error) {
 		return nil, fmt.Errorf("fetching app details: %w", err)
 	}
 
-	data, ok := response[appID]
-	if !ok || !data.Success {
+	data, ok := findSteamAppDetails(response, appID)
+	if !ok {
 		return nil, fmt.Errorf("no details found for appID %s", appID)
 	}
 
-	return &data.Data, nil
+	return &data, nil
+}
+
+// findSteamAppDetails handles Steam responses whose top-level key does not
+// match the requested app ID. Steam normally uses the requested ID as the
+// key, but some apps have recently returned a different key while retaining
+// the requested ID in data.steam_appid.
+func findSteamAppDetails(response map[string]SteamAppDetailsResponse, appID string) (SteamAppDetails, bool) {
+	if data, ok := response[appID]; ok && data.Success {
+		return data.Data, true
+	}
+
+	for _, data := range response {
+		if data.Success && fmt.Sprintf("%d", data.Data.SteamAppID) == appID {
+			return data.Data, true
+		}
+	}
+
+	return SteamAppDetails{}, false
 }
 
 // GetSteamAppInfo fetches app details and returns simplified AppInfo
